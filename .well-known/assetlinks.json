@@ -1,0 +1,10 @@
+[{
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+        "namespace": "android_app",
+        "package_name": "com.apnakharcha.app",
+        "sha256_cert_fingerprints": [
+            "7B:FE:CA:8E:EA:49:04:32:4C:A6:6E:13:D1:89:4C:1F:CF:5D:C1:F8:9D:43:7E:11:45:DE:7E:4D:4B:49:0F:C0"
+        ]
+    }
+}]
