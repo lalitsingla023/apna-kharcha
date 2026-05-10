@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Apna Kharcha</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#1a472a">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons (Phosphor Icons) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- PDF Generation Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Auth Screen -->
+    <div id="auth-screen" class="screen active">
+        <div class="auth-card">
+            <div class="logo-container">
+                <i class="ph ph-leaf logo-icon"></i>
+            </div>
+            <h1>Apna Kharcha</h1>
+            <p>Your Natural Expense Tracker</p>
+            
+            <form id="auth-form">
+                <input type="hidden" id="auth-mode" value="login">
+                
+                <div class="input-group" id="display-name-group" style="display: none;">
+                    <label for="reg-name">Full Name</label>
+                    <input type="text" id="reg-name" placeholder="Enter your full name">
+                </div>
+                
+                <div class="input-group">
+                    <label for="username">UserID</label>
+                    <input type="text" id="username" placeholder="e.g. john_123" required pattern="[a-zA-Z0-9_]{3,}" title="UserID must be at least 3 characters and contain only letters, numbers, and underscores">
+                </div>
+                
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter Password" required minlength="6" title="Password must be at least 6 characters">
+                </div>
+                
+                <button type="submit" id="auth-submit-btn" class="btn-primary">Login</button>
+                
+                <p class="auth-toggle-text text-muted" style="margin-top: 15px; font-size: 14px;">
+                    <span id="auth-toggle-label">Don't have an account?</span> 
+                    <button type="button" id="auth-toggle-btn" class="btn-text" style="display: inline; padding: 0;">Register here</button>
+                </p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="main-screen" class="screen">
+        <header>
+            <div class="user-info">
+                <div class="avatar"><i class="ph ph-user"></i></div>
+                <div>
+                    <span class="greeting">Hello,</span>
+                    <h2 id="display-name">User</h2>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="backup-btn" class="icon-btn" title="Backup/Restore Data"><i class="ph ph-cloud-arrow-up"></i></button>
+                <button id="logout-btn" class="icon-btn" title="Logout"><i class="ph ph-sign-out"></i></button>
+            </div>
+        </header>
+
+        <main>
+            <!-- Balance Card -->
+            <div class="balance-card">
+                <div class="balance-header">
+                    <span>Total Balance</span>
+                    <i class="ph ph-wallet"></i>
+                </div>
+                <h1 id="total-balance">₹0.00</h1>
+                
+                <div class="balance-stats">
+                    <div class="stat-item in">
+                        <div class="stat-icon"><i class="ph ph-arrow-down-left"></i></div>
+                        <div>
+                            <span>Income</span>
+                            <h3 id="total-in">₹0.00</h3>
+                        </div>
+                    </div>
+                    <div class="stat-item out">
+                        <div class="stat-icon"><i class="ph ph-arrow-up-right"></i></div>
+                        <div>
+                            <span>Expense</span>
+                            <h3 id="total-out">₹0.00</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="action-buttons">
+                <button class="action-btn btn-in" onclick="openModal('in')">
+                    <div class="action-icon"><i class="ph ph-plus"></i></div>
+                    <span>Cash In</span>
+                </button>
+                <button class="action-btn btn-out" onclick="openModal('out')">
+                    <div class="action-icon"><i class="ph ph-minus"></i></div>
+                    <span>Cash Out</span>
+                </button>
+            </div>
+
+            <!-- Transactions Section -->
+            <div class="transactions-section">
+                <div class="section-header">
+                    <h2>Recent Transactions</h2>
+                    <button id="open-export-modal" class="btn-text"><i class="ph ph-file-pdf"></i> Statement</button>
+                </div>
+                
+                <div id="transactions-list" class="transactions-list">
+                    <!-- Transactions will be injected here -->
+                    <div class="empty-state">
+                        <i class="ph ph-receipt"></i>
+                        <p>No transactions yet</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Add Transaction Modal -->
+    <div id="transaction-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Transaction</h2>
+                <button class="close-btn" onclick="closeModal()"><i class="ph ph-x"></i></button>
+            </div>
+            <form id="transaction-form">
+                <input type="hidden" id="tx-type" value="out">
+                
+                <div class="amount-input-wrapper">
+                    <span class="currency-symbol">₹</span>
+                    <input type="number" id="tx-amount" placeholder="0.00" step="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="tx-title">Description</label>
+                    <input type="text" id="tx-title" placeholder="What was this for?" required>
+                </div>
+                
+                <div class="input-group" style="display: flex; gap: 10px;">
+                    <div style="flex: 1;">
+                        <label for="tx-date">Date</label>
+                        <input type="date" id="tx-date" required>
+                    </div>
+                    <div style="flex: 1;">
+                        <label for="tx-time">Time</label>
+                        <input type="time" id="tx-time" required>
+                    </div>
+                </div>
+
+                <button type="submit" id="tx-submit-btn" class="btn-primary w-full">Save Record</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Backup Modal -->
+    <div id="backup-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Backup & Restore</h2>
+                <button class="close-btn" onclick="closeBackupModal()"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="backup-content">
+                <p>Google Drive / Local Backup. Download your data to keep it safe, or restore from a previous backup file.</p>
+                
+                <button id="download-backup" class="btn-primary w-full mb-3"><i class="ph ph-download-simple"></i> Download Backup File</button>
+                
+                <div class="divider"><span>OR</span></div>
+                
+                <div class="upload-wrapper">
+                    <label for="restore-file" class="btn-secondary w-full text-center cursor-pointer">
+                        <i class="ph ph-upload-simple"></i> Restore from File
+                    </label>
+                    <input type="file" id="restore-file" accept=".json" style="display: none;">
+                </div>
+                <p class="text-xs text-center mt-2 text-muted">Restoring will overwrite current data.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export PDF Modal -->
+    <div id="export-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Export Statement</h2>
+                <button class="close-btn" onclick="closeExportModal()"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="export-content">
+                <p class="text-muted mb-3">Select the transactions you want to include in the PDF.</p>
+                
+                <div class="export-options" style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer;">
+                        <input type="radio" name="export-range" value="all" checked style="width: auto;"> 
+                        <span style="font-weight: 500;">All Transactions</span>
+                    </label>
+                    
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                        <input type="radio" name="export-range" value="custom" style="width: auto;"> 
+                        <span style="font-weight: 500;">Custom Date Range</span>
+                    </label>
+                </div>
+                
+                <div id="export-date-range" style="display: none; display: flex; gap: 10px; margin-bottom: 20px;">
+                    <div style="flex: 1;">
+                        <label for="export-start" style="font-size: 14px; margin-bottom: 5px; display: block;">Start Date</label>
+                        <input type="date" id="export-start">
+                    </div>
+                    <div style="flex: 1;">
+                        <label for="export-end" style="font-size: 14px; margin-bottom: 5px; display: block;">End Date</label>
+                        <input type="date" id="export-end">
+                    </div>
+                </div>
+
+                <button id="generate-pdf-btn" class="btn-primary w-full"><i class="ph ph-download-simple"></i> Download PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Printable Area for PDF -->
+    <div id="pdf-content" style="display: none;">
+        <div class="pdf-container">
+            <div class="pdf-header">
+                <h1>Apna Kharcha</h1>
+                <p>Expense Statement</p>
+            </div>
+            <div class="pdf-user-info">
+                <p><strong>User:</strong> <span id="pdf-user-name"></span></p>
+                <p><strong>Generated On:</strong> <span id="pdf-date"></span></p>
+                <p><strong>Statement Period:</strong> <span id="pdf-period"></span></p>
+            </div>
+            <div class="pdf-summary">
+                <div class="pdf-box"><strong>Total Income:</strong> <span id="pdf-total-in"></span></div>
+                <div class="pdf-box"><strong>Total Expense:</strong> <span id="pdf-total-out"></span></div>
+                <div class="pdf-box"><strong>Net Balance:</strong> <span id="pdf-net"></span></div>
+            </div>
+            <table class="pdf-table">
+                <thead>
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>Description</th>
+                        <th>Type</th>
+                        <th class="text-right">Amount</th>
+                    </tr>
+                </thead>
+                <tbody id="pdf-table-body">
+                    <!-- Rows will be injected here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => console.log('Service worker registered.', reg))
+                    .catch((err) => console.log('Service worker registration failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>
