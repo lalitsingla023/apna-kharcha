@@ -38,76 +38,132 @@ const txModal = $('transaction-modal');
 const txForm = $('transaction-form');
 const toastEl = $('toast');
 
-// Google-only sign-in. Existing local account data is retained and explicitly mapped
-// after Google authentication; this code never clears or overwrites local finance keys.
+// Google-only sign-in with a stable local account per Supabase user.
+// The first Google login can clear old local Apna Kharcha data only after explicit confirmation.
 let monetraSupabase = null;
 let monetraCloudUser = null;
-let pendingGoogleUser = null;
+let authProcessingUserId = null;
+let authStartupResolved = false;
+let authStateSubscription = null;
 function setGoogleStatus(message, isError = false) {
   const el = $('google-auth-status');
   if (el) { el.textContent = message; el.style.color = isError ? 'var(--danger, #c44)' : ''; }
 }
+function clearLegacyLocalFinanceData() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('apna_kharcha_')) keys.push(key);
+  }
+  keys.forEach(key => localStorage.removeItem(key));
+  return keys.length;
+}
+function googleLocalAccountName(authUser) {
+  return 'google_' + String(authUser.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+}
 async function finishGoogleSignIn(authUser) {
   if (!authUser) return;
+  if (authProcessingUserId === authUser.id) return;
+  authProcessingUserId = authUser.id;
   monetraCloudUser = authUser;
-  localStorage.setItem('monetra_cloud_user_id', authUser.id);
-  try { await ensureCloudProfile(authUser); }
-  catch (error) { console.error('MONETRA profile:', error); setGoogleStatus('Google sign-in succeeded, but profile setup failed: ' + (error.message || 'Please try again.'), true); return; }
+  try {
+    localStorage.setItem('monetra_cloud_user_id', authUser.id);
+    const cleanMarker = 'monetra_google_cleaned_' + authUser.id;
+    if (!localStorage.getItem(cleanMarker)) {
+      const oldKeys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('apna_kharcha_')) oldKeys.push(key);
+      }
+      if (oldKeys.length) {
+        const approved = window.confirm(
+          'Start MONETRA fresh with this Google account?\n\n' +
+          'This will remove the older MONETRA / Apna Kharcha records stored in this browser only. ' +
+          'Your separate JSON backup file will not be changed. After sign-in, use Backup & Restore → Restore backup to import your JSON file.\n\n' +
+          'Continue only if your JSON backup is safely saved.'
+        );
+        if (!approved) {
+          setGoogleStatus('Sign-in paused. Your older local records have been kept. Sign in again when you are ready to start fresh.');
+          await monetraSupabase.auth.signOut();
+          showScreen('auth');
+          return;
+        }
+        clearLegacyLocalFinanceData();
+      }
+      localStorage.setItem(cleanMarker, '1');
+    }
+    try { await ensureCloudProfile(authUser); }
+    catch (error) { console.error('MONETRA profile:', error); setGoogleStatus('Google sign-in succeeded, but cloud profile setup failed: ' + (error.message || 'Please try again.'), true); return; }
 
-  const accounts = JSON.parse(localStorage.getItem('apna_kharcha_accounts') || '{}');
-  const names = Object.keys(accounts);
-  // A single existing local account is unambiguous and can be continued automatically.
-  if (names.length === 1) { activateLocalAccount(names[0], accounts[names[0]]); return; }
-  if (names.length > 1) {
-    pendingGoogleUser = authUser;
-    const picker = $('local-account-picker');
-    const select = $('existing-local-account');
-    select.innerHTML = '';
-    names.forEach(name => { const option = document.createElement('option'); option.value = name; option.textContent = `${name}${accounts[name]?.fullName ? ' — ' + accounts[name].fullName : ''}`; select.appendChild(option); });
-    picker.style.display = 'block';
-    setGoogleStatus('Google verified. Select which existing local account contains your MONETRA records.');
-    return;
+    const accountName = googleLocalAccountName(authUser);
+    const fullName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email || 'MONETRA user';
+    user = { name: accountName, fullName };
+    localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
+    loadData();
+    showScreen('main');
+    setGoogleStatus('Signed in with Google. Your MONETRA session will be restored automatically when you reopen or reload this page.');
+  } finally {
+    authProcessingUserId = null;
+    authStartupResolved = true;
+    document.body.classList.remove('auth-pending');
   }
-  // No legacy account exists in this browser profile: create a stable local namespace
-  // from the Supabase user UUID, without creating or changing password credentials.
-  const safeName = 'google_' + authUser.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
-  user = { name: safeName, fullName: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email || 'MONETRA user' };
-  localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
-  loadData(); showScreen('main'); setGoogleStatus('Signed in with Google.');
 }
-function activateLocalAccount(name, account) {
-  user = { name, fullName: account?.fullName || name };
-  localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
-  try { loadData(); showScreen('main'); setGoogleStatus('Signed in with Google. Your existing local records are ready.'); }
-  catch (error) { console.error(error); setGoogleStatus(error.message || 'Could not load local records. Restore your JSON backup.', true); }
+function resolveInitialAuthScreen(session) {
+  if (session?.user) {
+    finishGoogleSignIn(session.user).catch(error => {
+      console.error('MONETRA session restore:', error);
+      setGoogleStatus(error.message || 'Could not restore your Google session. Please sign in again.', true);
+      showScreen('auth');
+      authStartupResolved = true;
+      document.body.classList.remove('auth-pending');
+    });
+  } else {
+    user = null;
+    showScreen('auth');
+    authStartupResolved = true;
+    document.body.classList.remove('auth-pending');
+  }
 }
 function initMonetraCloudAuth() {
   try {
     const cfg = window.MONETRA_SUPABASE_CONFIG;
-    if (!cfg || !window.supabase?.createClient) { setGoogleStatus('Google sign-in is unavailable. Check your connection and reload.', true); return; }
-    monetraSupabase = window.supabase.createClient(cfg.url, cfg.publishableKey);
+    if (!cfg || !window.supabase?.createClient) {
+      setGoogleStatus('Google sign-in is unavailable. Check your connection and reload.', true);
+      document.body.classList.remove('auth-pending');
+      return;
+    }
+    monetraSupabase = window.supabase.createClient(cfg.url, cfg.publishableKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
     $('google-login-btn')?.addEventListener('click', async () => {
       const button = $('google-login-btn'); button.disabled = true; setGoogleStatus('Connecting to Google…');
       try {
         const { error } = await monetraSupabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + window.location.pathname } });
         if (error) throw error;
-      } catch (error) { console.error('Google OAuth:', error); setGoogleStatus(error.message || 'Google sign-in could not start.', true); button.disabled = false; }
-    });
-    $('use-local-account-btn')?.addEventListener('click', () => {
-      const name = $('existing-local-account').value;
-      const accounts = JSON.parse(localStorage.getItem('apna_kharcha_accounts') || '{}');
-      if (name && accounts[name]) activateLocalAccount(name, accounts[name]);
-    });
-    monetraSupabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED')) {
-        setTimeout(() => finishGoogleSignIn(session.user).catch(error => { console.error(error); setGoogleStatus(error.message || 'Could not finish Google sign-in.', true); }), 0);
+      } catch (error) {
+        console.error('Google OAuth:', error); setGoogleStatus(error.message || 'Google sign-in could not start.', true); button.disabled = false;
       }
     });
-    monetraSupabase.auth.getSession().then(({ data, error }) => {
-      if (error) throw error;
-      if (data?.session?.user) finishGoogleSignIn(data.session.user);
-    }).catch(error => { console.warn('MONETRA cloud session:', error); setGoogleStatus(error.message || 'Could not restore Google session.', true); });
-  } catch (error) { console.warn('MONETRA cloud setup:', error); setGoogleStatus('Google sign-in could not be initialized.', true); }
+    const { data } = monetraSupabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') {
+        resolveInitialAuthScreen(session);
+      } else if (session?.user && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
+        if (!authProcessingUserId) {
+          setTimeout(() => finishGoogleSignIn(session.user).catch(error => {
+            console.error('MONETRA auth event:', error); setGoogleStatus(error.message || 'Could not finish Google sign-in.', true);
+          }), 0);
+        }
+      } else if (event === 'SIGNED_OUT') {
+        user = null; transactions = []; creditPurchases = []; loans = [];
+        showScreen('auth');
+      }
+    });
+    authStateSubscription = data?.subscription || null;
+  } catch (error) {
+    console.warn('MONETRA cloud setup:', error);
+    setGoogleStatus('Google sign-in could not be initialized.', true);
+    document.body.classList.remove('auth-pending');
+  }
 }
 async function ensureCloudProfile(authUser) {
   if (!monetraSupabase || !authUser) return;
@@ -801,12 +857,15 @@ function changeTab(tab) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// Google is the only sign-in method. Keep legacy local account records untouched.
+// Google is the only sign-in method. Signing out does not delete financial records.
 $('logout-btn').addEventListener('click', async () => {
   localStorage.removeItem('apna_kharcha_user');
-  if (monetraSupabase) await monetraSupabase.auth.signOut();
+  if (monetraSupabase) {
+    const { error } = await monetraSupabase.auth.signOut();
+    if (error) { console.error('MONETRA sign out:', error); showToast('Could not sign out. Please try again.', 'error'); return; }
+  }
   user = null; transactions = []; creditPurchases = []; loans = [];
-  usernameInput.value = ''; passwordInput.value = ''; showScreen('auth');
+  showScreen('auth');
 });
 
 // Cash in / cash out form, including edit existing transaction.
@@ -1761,15 +1820,13 @@ $('generate-pdf-btn').addEventListener('click', () => {
   }
 });
 
-// Boot and attempt to load an existing v1 session without disrupting its LocalStorage data.
+// Boot: keep screens hidden until Supabase has restored the persisted Google session.
 function init() {
+  document.body.classList.add('auth-pending');
   initMonetraCloudAuth();
   bindThemePreference();
   setInitialFormOptions();
   setTodayDefaults();
-  // Do not bypass Google sign-in with a stale local-only session.
-  localStorage.removeItem('apna_kharcha_user');
-  showScreen('auth');
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(reg => { serviceWorkerRegistration = reg; }).catch(() => {});
   }

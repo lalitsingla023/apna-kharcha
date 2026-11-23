@@ -1,15 +1,15 @@
-# MONETRA v4.2 — Google-only sign-in
+# MONETRA v4.3 — Google-only sign-in, fresh local start and persistent session
 
 This update replaces the User ID/password login screen with **Continue with Google**, using the Supabase Google provider already enabled for this project.
 
 ## Local-data safety
 
 - Existing local finance storage keys (`apna_kharcha_*`) are not deleted or rewritten by the sign-in change.
-- If this browser profile has exactly one existing MONETRA local account, Google sign-in continues into that account automatically.
-- If multiple local accounts exist, the app asks which local account's records to open.
-- If no local account exists in this browser profile, a new empty local namespace is created for the Google identity. Existing records on another device/browser are not automatically transferred.
-- Google authentication is not cloud backup or cross-device sync. Keep your JSON backup and do not clear browser/app storage.
-- The old local password login is no longer available from the UI. Existing local account metadata is retained as a data-preservation measure.
+- On the first Google sign-in, if older `apna_kharcha_*` data exists in this browser, the app asks for confirmation before deleting it. This is the requested fresh-start step.
+- Only after confirmation are old local Apna Kharcha/MONETRA keys removed from this browser. Your separate JSON backup file is not touched.
+- A new, stable local namespace is created for the Google account. Use Backup & Restore → Restore backup to import your saved JSON.
+- The Supabase Google session is persisted in browser storage; reload should return directly to the dashboard after session restoration.
+- Signing out does not delete finance records. Google authentication is not cloud backup or cross-device sync.
 
 ## Publish
 
@@ -37,3 +37,12 @@ Supabase's browser `signInWithOAuth({ provider: 'google' })` flow redirects to G
 6. Test a second device separately. A new device will not inherit local records unless you explicitly restore/import your JSON backup or implement cloud sync later.
 
 If Google sign-in fails, use the browser's reload and check the Supabase redirect allow list. Do not clear site data to troubleshoot.
+
+
+## v4.3 changes
+
+- Removed the old local-account picker; each Google identity maps to one stable local data namespace.
+- Added an explicit confirmation before clearing older local `apna_kharcha_*` records on the first Google sign-in.
+- Fixed reload behavior by waiting for Supabase `INITIAL_SESSION` before showing either the login screen or dashboard.
+- Uses Supabase's persisted browser session and restores the dashboard on reload.
+- The JSON backup must be imported after the fresh start using the in-app Backup & Restore screen.

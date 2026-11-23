@@ -903,3 +903,7 @@ html[data-theme="dark"] .tab-btn.active .nav-count { color: #09291c; background:
 @media (max-width: 520px) {
   .brand-lockup .greeting { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* Prevent a login-screen flash while Supabase restores a saved Google session. */
+body.auth-pending .screen { visibility: hidden !important; }
+body.auth-pending { cursor: progress; }
