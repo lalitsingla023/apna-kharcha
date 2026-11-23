@@ -1,6 +1,6 @@
 'use strict';
 
-// Apna Kharcha — version 2.1 (modal + offline PDF reliability)
+// Apna Kharcha — version 2.2 (modal recursion + PDF export fix)
 // Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
 
 const APP_VERSION = 2;
@@ -741,6 +741,8 @@ function showModal(id) {
   document.querySelectorAll('.modal-overlay.active').forEach(open => {
     if (open !== modal) closeModal(open.id);
   });
+  modal.style.removeProperty('display');
+  modal.style.removeProperty('pointer-events');
   modal.hidden = false;
   modal.removeAttribute('inert');
   modal.setAttribute('aria-hidden', 'false');
@@ -754,11 +756,17 @@ function closeModal(id) {
   modal.classList.remove('active');
   modal.setAttribute('aria-hidden', 'true');
   modal.hidden = true;
+  // Explicitly suppress display and touch events as an extra safeguard against
+  // stale modal styles in installed PWAs / Android Custom Tabs.
+  modal.style.setProperty('display', 'none');
+  modal.style.setProperty('pointer-events', 'none');
   modal.setAttribute('inert', '');
   if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
   return true;
 }
-window.closeModal = () => closeModal('transaction-modal');
+// Expose the real modal function directly. Do not wrap it by calling the global
+// closeModal name: that would recurse after the window property is reassigned.
+window.closeModal = closeModal;
 txForm.addEventListener('submit', event => {
   event.preventDefault();
   const id = $('tx-id').value;

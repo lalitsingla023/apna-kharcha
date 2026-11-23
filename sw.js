@@ -1,17 +1,22 @@
-const CACHE_NAME = 'apna-kharcha-v4-modal-pdf-reliable';
-const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json'];
+const CACHE_NAME = 'apna-kharcha-v5-modal-recursion-pdf-fix';
+const APP_SHELL = [
+  './',
+  './index.html',
+  './style.css?v=2.2.0',
+  './app.js?v=2.2.0',
+  './manifest.json'
+];
 const OPTIONAL_ASSETS = ['./icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    // Required app files must be cached; optional icons must never block an update.
     await cache.addAll(APP_SHELL);
     await Promise.all(OPTIONAL_ASSETS.map(async path => {
       try {
         const response = await fetch(path, { cache: 'no-store' });
         if (response.ok) await cache.put(path, response);
-      } catch (_) { /* optional icon not deployed yet */ }
+      } catch (_) { /* optional icons do not block app updates */ }
     }));
     await self.skipWaiting();
   })());
@@ -38,6 +43,8 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
     try {
+      // Prefer the deployed revision whenever online. This prevents a successful
+      // GitHub Pages update from being hidden by an older cached app.js.
       const fresh = await fetch(request, { cache: 'no-store' });
       if (fresh && fresh.ok) {
         const key = request.mode === 'navigate' ? './index.html' : request;
@@ -45,8 +52,11 @@ self.addEventListener('fetch', event => {
       }
       return fresh;
     } catch (error) {
-      return (await cache.match(request)) || (await cache.match('./index.html')) ||
-        new Response('Apna Kharcha is unavailable offline. Reconnect and reload.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      const cached = await cache.match(request) || (request.mode === 'navigate' ? await cache.match('./index.html') : null);
+      return cached || new Response('Apna Kharcha is unavailable offline. Reconnect and reload.', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      });
     }
   })());
 });
