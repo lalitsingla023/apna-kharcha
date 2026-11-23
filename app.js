@@ -38,6 +38,52 @@ const txModal = $('transaction-modal');
 const txForm = $('transaction-form');
 const toastEl = $('toast');
 
+// Optional cloud identity: local MONETRA accounts and records remain the source of truth
+// until a separate, explicit data migration/sync step is approved.
+let monetraSupabase = null;
+let monetraCloudUser = null;
+function initMonetraCloudAuth() {
+  try {
+    const cfg = window.MONETRA_SUPABASE_CONFIG;
+    if (!cfg || !window.supabase?.createClient) return;
+    monetraSupabase = window.supabase.createClient(cfg.url, cfg.publishableKey);
+    monetraSupabase.auth.getSession().then(async ({ data, error }) => {
+      if (error) throw error;
+      monetraCloudUser = data?.session?.user || null;
+      if (monetraCloudUser) {
+        localStorage.setItem('monetra_cloud_user_id', monetraCloudUser.id);
+        await ensureCloudProfile(monetraCloudUser);
+        if (user) showToast('Google account connected. Your existing local records are unchanged.');
+      }
+    }).catch(error => { console.warn('MONETRA cloud session:', error); });
+    $('google-connect-btn')?.addEventListener('click', async () => {
+      if (!user) { showToast('Please sign in to your existing MONETRA account first.', 'error'); return; }
+      if (!monetraSupabase) { showToast('Cloud sign-in could not be initialized. Check your internet connection.', 'error'); return; }
+      const button = $('google-connect-btn');
+      button.disabled = true;
+      try {
+        const { error } = await monetraSupabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: window.location.origin + window.location.pathname }
+        });
+        if (error) throw error;
+      } catch (error) {
+        console.error('Google OAuth:', error);
+        showToast(error.message || 'Google sign-in could not start.', 'error');
+        button.disabled = false;
+      }
+    });
+  } catch (error) { console.warn('MONETRA cloud setup:', error); }
+}
+async function ensureCloudProfile(authUser) {
+  if (!monetraSupabase || !authUser) return;
+  const display = authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email || 'MONETRA user';
+  const { error } = await monetraSupabase.from('profiles').upsert({
+    id: authUser.id, display_name: display, updated_at: new Date().toISOString()
+  }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
 const THEME_STORAGE_KEY = 'montera_theme_preference';
 const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -1716,6 +1762,7 @@ $('generate-pdf-btn').addEventListener('click', () => {
 
 // Boot and attempt to load an existing v1 session without disrupting its LocalStorage data.
 function init() {
+  initMonetraCloudAuth();
   bindThemePreference();
   setInitialFormOptions();
   setTodayDefaults();

@@ -65,6 +65,7 @@
         <button id="appearance-btn" class="icon-btn" type="button" title="Appearance settings" aria-label="Appearance settings"><i class="ph ph-sun-dim"></i></button>
         <button id="notifications-btn" class="icon-btn" type="button" title="Enable reminders" aria-label="Enable reminders"><i class="ph ph-bell"></i></button>
         <button id="backup-btn" class="icon-btn" type="button" title="Backup and restore" aria-label="Backup and restore"><i class="ph ph-cloud-arrow-up"></i></button>
+        <button id="google-connect-btn" class="icon-btn" type="button" title="Connect Google cloud account" aria-label="Connect Google cloud account"><i class="ph ph-google-logo"></i></button>
         <button id="logout-btn" class="icon-btn" type="button" title="Log out" aria-label="Log out"><i class="ph ph-sign-out"></i></button>
       </div>
     </header>
@@ -319,7 +320,9 @@
     </div>
   </div>
 
-  <script src="app.js?v=4.0.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js?v=4.1.0"></script>
+  <script src="app.js?v=4.1.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
