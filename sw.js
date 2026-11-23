@@ -1,9 +1,9 @@
-const CACHE_NAME = 'apna-kharcha-v5-modal-recursion-pdf-fix';
+const CACHE_NAME = 'apna-kharcha-v6-designed-financial-pdf';
 const APP_SHELL = [
   './',
   './index.html',
   './style.css?v=2.2.0',
-  './app.js?v=2.2.0',
+  './app.js?v=2.3.0',
   './manifest.json'
 ];
 const OPTIONAL_ASSETS = ['./icon-192.png', './icon-512.png'];

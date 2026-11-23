@@ -1,6 +1,6 @@
 'use strict';
 
-// Apna Kharcha — version 2.2 (modal recursion + PDF export fix)
+// Apna Kharcha — version 2.3 (designed financial statement PDF)
 // Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
 
 const APP_VERSION = 2;
@@ -1146,136 +1146,342 @@ document.querySelectorAll('input[name="export-range"]').forEach(radio => radio.a
 function pdfAscii(value) {
   return String(value ?? '')
     .replace(/₹/g, 'INR ')
-    .replace(/[\u2012-\u2015]/g, '-')
+    .replace(/[\u2010-\u2015]/g, '-')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
-    .replace(/[\u2022\u00b7]/g, '-')
+    .replace(/[\u2022\u00b7]/g, ' | ')
+    .replace(/\u2026/g, '...')
     .normalize('NFKD')
     .replace(/[^\x20-\x7E]/g, '?');
 }
 function pdfEscape(value) {
   return pdfAscii(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 }
-function pdfWrap(value, maxChars) {
-  const text = pdfAscii(value).trim();
-  if (!text) return ['-'];
-  const words = text.split(/\s+/);
+function pdfWrap(value, maxChars, maxLines = 2) {
+  const clean = pdfAscii(value).replace(/\s+/g, ' ').trim();
+  if (!clean) return ['-'];
+  const words = clean.split(' ');
   const lines = [];
   let line = '';
-  words.forEach(word => {
+  for (let word of words) {
     while (word.length > maxChars) {
       if (line) { lines.push(line); line = ''; }
+      if (lines.length >= maxLines) break;
       lines.push(word.slice(0, maxChars));
       word = word.slice(maxChars);
     }
-    if (!word) return;
+    if (lines.length >= maxLines) break;
+    if (!word) continue;
     const next = line ? `${line} ${word}` : word;
     if (next.length > maxChars && line) { lines.push(line); line = word; }
     else line = next;
-  });
-  if (line) lines.push(line);
-  return lines.length ? lines : ['-'];
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  if (!lines.length) return ['-'];
+  const consumed = lines.join(' ').replace(/\s/g, '').length;
+  const original = clean.replace(/\s/g, '').length;
+  if (consumed < original) {
+    const last = lines.length - 1;
+    lines[last] = lines[last].replace(/[. ]+$/g, '') + '...';
+  }
+  return lines;
 }
 function pdfCurrency(value) {
   return `INR ${safeNumber(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-function makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period }) {
+function pdfCompactCurrency(value) {
+  return safeNumber(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function isLoanRepaymentEntry(tx) {
+  return tx.kind === 'loan-repayment' || tx.category === 'Loan repayment';
+}
+function isLoanDisbursementEntry(tx) {
+  return tx.kind === 'loan-disbursement' || tx.category === 'Money Lent';
+}
+function isCardRepaymentEntry(tx) {
+  return tx.kind === 'credit-card-payment' || tx.category === 'Credit Card Payment';
+}
+function isDirectExpenseEntry(tx) {
+  return tx.type === 'out' && !tx.excludeFromSpendStats && !isLoanDisbursementEntry(tx) && !isCardRepaymentEntry(tx) && tx.category !== 'Money Lent';
+}
+function groupPdfAmounts(items, getKey, getAmount, labels) {
+  const totals = new Map((labels || []).map(label => [label, 0]));
+  items.forEach(item => {
+    const key = getKey(item) || 'Other';
+    totals.set(key, safeNumber((totals.get(key) || 0) + Number(getAmount(item) || 0)));
+  });
+  return [...totals.entries()].map(([label, amount]) => ({ label, amount })).filter(item => item.amount > 0).sort((a, b) => b.amount - a.amount);
+}
+function calculateOutstandingAtDate(items, amountField, purchaseDateField, repaymentsField, endDate, today) {
+  let total = 0;
+  let complete = true;
+  items.forEach(item => {
+    if (String(item[purchaseDateField] || '') > endDate) return;
+    const repayments = Array.isArray(item[repaymentsField]) ? item[repaymentsField] : [];
+    let paid = safeNumber(repayments.filter(payment => isValidDateISO(payment.date) && payment.date <= endDate)
+      .reduce((s, payment) => s + Number(payment.amount || 0), 0));
+    // Old records can contain a current paid/outstanding snapshot without dated repayment rows.
+    // It is safe for a statement ending today, but must not be backdated into an earlier period.
+    if (!repayments.length) {
+      const storedPaid = repaymentsField === 'payments'
+        ? safeNumber(item.paidAmount || 0)
+        : safeNumber(Number(item.amount || 0) - Number(item.outstanding ?? item.amount));
+      if (endDate >= today) paid = storedPaid;
+      else if (storedPaid > 0) complete = false;
+    }
+    total += Math.max(0, Number(item[amountField] || 0) - paid);
+  });
+  return { value: complete ? safeNumber(total) : null, complete };
+}
+function makeStatementPdf(report) {
   const PAGE_W = 595.28;
   const PAGE_H = 841.89;
   const LEFT = 36;
   const RIGHT = 559;
-  const opsPages = [];
+  const CONTENT_W = RIGHT - LEFT;
+  const pages = [];
   let ops = [];
-  let y = 0;
 
-  const line = (x1, y1, x2, y2, gray = 0.82) => {
-    ops.push(`${gray} G 0.6 w ${x1} ${y1} m ${x2} ${y2} l S`);
+  const C = {
+    forest: [0.075, 0.225, 0.155],
+    forest2: [0.12, 0.32, 0.235],
+    ink: [0.13, 0.19, 0.155],
+    muted: [0.39, 0.46, 0.41],
+    sage: [0.43, 0.57, 0.47],
+    gold: [0.82, 0.67, 0.40],
+    white: [1, 1, 1],
+    paper: [0.985, 0.989, 0.979],
+    panel: [0.965, 0.976, 0.960],
+    border: [0.87, 0.90, 0.86],
+    green: [0.16, 0.45, 0.30],
+    greenLight: [0.91, 0.955, 0.92],
+    red: [0.70, 0.31, 0.27],
+    redLight: [0.985, 0.94, 0.93],
+    blue: [0.29, 0.43, 0.58],
+    blueLight: [0.93, 0.955, 0.975],
+    amberLight: [0.985, 0.965, 0.92],
+    grayBar: [0.89, 0.92, 0.88]
   };
-  const fillRect = (x, yBottom, width, height, gray) => {
-    ops.push(`${gray} g ${x} ${yBottom} ${width} ${height} re f 0 g`);
+  const rgb = color => color.map(v => Number(v).toFixed(3)).join(' ');
+  const rect = (x, y, w, h, color) => ops.push(`q ${rgb(color)} rg ${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f Q`);
+  const strokeRect = (x, y, w, h, color, width = 0.6) => ops.push(`q ${rgb(color)} RG ${width} w ${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re S Q`);
+  const line = (x1, y1, x2, y2, color = C.border, width = 0.55) => ops.push(`q ${rgb(color)} RG ${width} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S Q`);
+  const text = (x, y, value, size = 8, font = 'F1', color = C.ink) => {
+    const safe = pdfEscape(value);
+    ops.push(`q ${rgb(color)} rg BT /${font} ${size.toFixed(2)} Tf 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${safe}) Tj ET Q`);
   };
-  const text = (x, yPos, value, size = 8.5, font = 'F1', gray = 0.12) => {
-    ops.push(`${gray} g BT /${font} ${size} Tf 1 0 0 1 ${x} ${yPos} Tm (${pdfEscape(value)}) Tj ET 0 g`);
+  const textRight = (rightX, y, value, size = 8, font = 'F1', color = C.ink) => {
+    const safe = pdfAscii(value);
+    // A conservative Helvetica width estimate; it keeps amounts aligned without clipping.
+    const width = safe.length * size * 0.54;
+    text(rightX - width, y, safe, size, font, color);
   };
-  const addFooter = (pageIndex, pageCount) => {
-    line(LEFT, 38, RIGHT, 38, 0.84);
-    text(LEFT, 24, 'Apna Kharcha - Personal statement', 7, 'F1', 0.4);
-    text(RIGHT - 62, 24, `Page ${pageIndex + 1} of ${pageCount}`, 7, 'F1', 0.4);
+  const bar = (x, y, w, h, ratio, color = C.green) => {
+    rect(x, y, w, h, C.grayBar);
+    if (ratio > 0) rect(x, y, Math.max(1.5, w * Math.min(1, ratio)), h, color);
   };
-  const drawTableHeading = (continued = false) => {
-    fillRect(LEFT, y - 19, RIGHT - LEFT, 22, 0.93);
-    text(LEFT + 7, y - 11, continued ? 'TRANSACTION DETAILS (CONTINUED)' : 'TRANSACTION DETAILS', 8, 'F2', 0.22);
-    y -= 34;
-    text(LEFT + 5, y, 'DATE / TIME', 6.7, 'F2', 0.38);
-    text(125, y, 'DESCRIPTION', 6.7, 'F2', 0.38);
-    text(286, y, 'CATEGORY / METHOD', 6.7, 'F2', 0.38);
-    text(408, y, 'TYPE', 6.7, 'F2', 0.38);
-    text(490, y, 'AMOUNT', 6.7, 'F2', 0.38);
-    y -= 9;
-    line(LEFT, y, RIGHT, y, 0.68);
-    y -= 14;
+  const sectionTitle = (x, y, title, subtitle = '') => {
+    text(x, y, title.toUpperCase(), 8.2, 'F2', C.forest);
+    if (subtitle) text(x, y - 11, subtitle, 6.8, 'F1', C.muted);
   };
-  const beginPage = (isFirst) => {
-    ops = [];
-    y = 802;
-    if (isFirst) {
-      text(LEFT, y, 'APNA KHARCHA', 19, 'F2', 0.12);
-      text(LEFT, y - 19, 'Personal money statement', 9, 'F1', 0.42);
-      text(390, y + 1, `Generated: ${new Date().toLocaleDateString('en-IN')}`, 8, 'F1', 0.35);
-      text(LEFT, y - 43, `Statement period: ${period}`, 9, 'F2', 0.2);
-      y -= 65;
-      const boxY = y - 57;
-      const boxW = 124;
-      const gap = 9;
-      const summaries = [
-        ['MONEY IN', pdfCurrency(totalIn)],
-        ['MONEY OUT', pdfCurrency(totalOut)],
-        ['NET CASH BALANCE', pdfCurrency(totalIn - totalOut)],
-        ['CARD PURCHASES', pdfCurrency(cardTotal)]
-      ];
-      summaries.forEach((item, i) => {
-        const x = LEFT + i * (boxW + gap);
-        fillRect(x, boxY, boxW, 49, i === 2 ? 0.91 : 0.96);
-        text(x + 8, boxY + 32, item[0], 6.2, 'F2', 0.42);
-        text(x + 8, boxY + 14, item[1], 8.2, 'F2', 0.16);
-      });
-      y = boxY - 25;
-    } else {
-      text(LEFT, y, 'APNA KHARCHA - TRANSACTION DETAILS', 11, 'F2', 0.16);
-      y -= 34;
-    }
-    drawTableHeading(!isFirst);
+  const addFooter = pageIndex => {
+    line(LEFT, 38, RIGHT, 38, C.border, 0.65);
+    text(LEFT, 24, 'APNA KHARCHA  |  PERSONAL FINANCIAL RECORD', 6.4, 'F2', C.muted);
+    textRight(RIGHT, 24, `PAGE ${pageIndex + 1} OF __TOTAL__`, 6.4, 'F1', C.muted);
   };
+  const startPage = () => { ops = []; };
+  const finishPage = () => pages.push(ops.join('\n'));
 
-  beginPage(true);
-  rows.forEach((row, rowIndex) => {
-    const dateLines = pdfWrap(row.dateTime, 17);
-    const titleLines = pdfWrap(row.description, 31);
-    const categoryLines = pdfWrap(row.categoryMethod, 21);
-    const typeLines = pdfWrap(row.type, 11);
-    const lineCount = Math.max(dateLines.length, titleLines.length, categoryLines.length, typeLines.length, 1);
-    const rowHeight = Math.max(22, lineCount * 10 + 8);
-    if (y - rowHeight < 57) {
-      opsPages.push(ops.join('\n'));
-      beginPage(false);
-    }
-    if (rowIndex % 2 === 1) fillRect(LEFT, y - rowHeight + 2, RIGHT - LEFT, rowHeight, 0.975);
-    for (let i = 0; i < lineCount; i++) {
-      const textY = y - 9 - (i * 10);
-      if (dateLines[i]) text(LEFT + 5, textY, dateLines[i], 6.8, 'F1', 0.18);
-      if (titleLines[i]) text(125, textY, titleLines[i], 7.2, 'F1', 0.13);
-      if (categoryLines[i]) text(286, textY, categoryLines[i], 6.7, 'F1', 0.28);
-      if (typeLines[i]) text(408, textY, typeLines[i], 6.7, 'F1', 0.28);
-    }
-    const amountText = pdfAscii(row.amountText);
-    text(490, y - 9, amountText, 7.1, 'F2', row.negative ? 0.32 : 0.12);
-    y -= rowHeight;
-    line(LEFT, y, RIGHT, y, 0.91);
-    y -= 3;
+  // PAGE 1: executive summary, cash flow, spending patterns and outstanding balances.
+  startPage();
+  rect(0, 716, PAGE_W, 126, C.forest);
+  rect(0, 712, PAGE_W, 4, C.gold);
+  text(LEFT, 798, 'APNA KHARCHA', 21, 'F2', C.white);
+  text(LEFT, 780, 'PERSONAL FINANCE  |  CASH FLOW & SPENDING REPORT  |  AMOUNTS IN INR', 7.2, 'F2', [0.83, 0.88, 0.83]);
+  text(LEFT, 754, `PREPARED FOR  ${pdfWrap(report.accountName || 'Personal account', 42, 1)[0]}`, 8, 'F1', C.white);
+  text(LEFT, 738, `REPORT PERIOD  ${pdfWrap(report.period || 'All records', 48, 1)[0]}`, 8, 'F2', C.white);
+  rect(439, 786, 120, 21, C.forest2);
+  text(451, 793, 'PRIVATE STATEMENT', 7, 'F2', C.white);
+  textRight(RIGHT, 755, `Generated ${report.generatedAt}`, 6.8, 'F1', [0.88, 0.91, 0.87]);
+
+  // Three high-level measures are all actual recorded cash movements.
+  const kpis = [
+    { label: 'CASH RECEIVED', value: pdfCurrency(report.cashIn), note: 'All recorded inflows', fill: C.greenLight, valueColor: C.green },
+    { label: 'CASH PAID OUT', value: pdfCurrency(report.cashOut), note: 'All recorded outflows', fill: C.redLight, valueColor: C.red },
+    { label: 'NET CASH MOVEMENT', value: pdfCurrency(report.netCash), note: 'Received minus paid out', fill: C.blueLight, valueColor: report.netCash >= 0 ? C.green : C.red }
+  ];
+  const kpiTop = 696, kpiH = 67, gap = 10, kpiW = (CONTENT_W - gap * 2) / 3;
+  kpis.forEach((kpi, i) => {
+    const x = LEFT + i * (kpiW + gap);
+    rect(x, kpiTop - kpiH, kpiW, kpiH, kpi.fill);
+    rect(x, kpiTop - 4, kpiW, 4, i === 1 ? C.red : (i === 2 ? C.blue : C.green));
+    text(x + 10, kpiTop - 19, kpi.label, 7, 'F2', C.muted);
+    text(x + 10, kpiTop - 42, pdfWrap(kpi.value, 22, 1)[0], 11, 'F2', kpi.valueColor);
+    text(x + 10, kpiTop - 56, kpi.note, 6.3, 'F1', C.muted);
   });
-  opsPages.push(ops.join('\n'));
 
-  // Write a standards-compliant, multi-page PDF using the built-in Helvetica fonts.
+  sectionTitle(LEFT, 608, 'Cash flow summary', 'Actual movements recorded in your cash and bank balances');
+  const flowTop = 583, flowH = 143, flowW = (CONTENT_W - 10) / 2;
+  const leftX = LEFT, rightX = LEFT + flowW + 10, flowBottom = flowTop - flowH;
+  rect(leftX, flowBottom, flowW, flowH, C.paper); strokeRect(leftX, flowBottom, flowW, flowH, C.border);
+  rect(rightX, flowBottom, flowW, flowH, C.paper); strokeRect(rightX, flowBottom, flowW, flowH, C.border);
+  rect(leftX, flowTop - 26, flowW, 26, C.greenLight);
+  rect(rightX, flowTop - 26, flowW, 26, C.redLight);
+  text(leftX + 10, flowTop - 17, 'MONEY IN', 7.6, 'F2', C.green);
+  text(rightX + 10, flowTop - 17, 'MONEY OUT', 7.6, 'F2', C.red);
+  const drawFlowRows = (x, rows, totalLabel, totalValue, totalColor) => {
+    let yy = flowTop - 43;
+    rows.forEach((row, index) => {
+      text(x + 10, yy, row.label, 7.0, 'F1', C.muted);
+      textRight(x + flowW - 10, yy, pdfCompactCurrency(row.value), 7.0, 'F2', C.ink);
+      yy -= 17;
+    });
+    line(x + 10, yy + 7, x + flowW - 10, yy + 7, C.border, 0.6);
+    text(x + 10, yy - 7, totalLabel, 7.1, 'F2', C.ink);
+    textRight(x + flowW - 10, yy - 7, pdfCurrency(totalValue), 7.3, 'F2', totalColor);
+  };
+  drawFlowRows(leftX, [
+    { label: 'Income and other receipts', value: report.incomeReceived },
+    { label: 'Loan repayments received', value: report.loanReturned },
+    { label: 'Other tagged receipts', value: report.otherCashIn }
+  ], 'TOTAL CASH IN', report.cashIn, C.green);
+  drawFlowRows(rightX, [
+    { label: 'Day-to-day expenses', value: report.directExpenses },
+    { label: 'Money lent to others', value: report.moneyLent },
+    { label: 'Credit card repayments', value: report.cardRepayments },
+    { label: 'Other cash outflows', value: report.otherCashOut }
+  ], 'TOTAL CASH OUT', report.cashOut, C.red);
+
+  sectionTitle(LEFT, 419, 'Spending breakdown', `Recorded spending this period  |  ${pdfCurrency(report.totalSpending)} (direct expenses + card purchases)`);
+  const spendTop = 391, spendH = 183, spendBottom = spendTop - spendH;
+  const catX = LEFT, catW = 330, methodX = catX + catW + 10, methodW = CONTENT_W - catW - 10;
+  rect(catX, spendBottom, catW, spendH, C.paper); strokeRect(catX, spendBottom, catW, spendH, C.border);
+  rect(methodX, spendBottom, methodW, spendH, C.paper); strokeRect(methodX, spendBottom, methodW, spendH, C.border);
+  text(catX + 10, spendTop - 17, 'BY CATEGORY', 7.1, 'F2', C.forest);
+  textRight(catX + catW - 10, spendTop - 17, 'AMOUNT (INR)', 6.3, 'F2', C.muted);
+  line(catX + 10, spendTop - 24, catX + catW - 10, spendTop - 24, C.border);
+  const rawCategories = report.categoryTotals;
+  const categories = rawCategories.length > 13
+    ? [...rawCategories.slice(0, 12), { label: `Other categories (${rawCategories.length - 12})`, amount: safeNumber(rawCategories.slice(12).reduce((total, item) => total + item.amount, 0)) }]
+    : rawCategories;
+  if (!categories.length) {
+    text(catX + 12, spendTop - 48, 'No spending recorded for this period.', 7.5, 'F1', C.muted);
+  } else {
+    const maxCategory = Math.max(...categories.map(item => item.amount), 1);
+    const rowStep = 11.4;
+    categories.forEach((item, i) => {
+      const yy = spendTop - 39 - i * rowStep;
+      if (yy < spendBottom + 5) return;
+      text(catX + 10, yy, pdfWrap(item.label, 34, 1)[0], 6.7, 'F1', C.ink);
+      bar(catX + 151, yy - 2, 83, 4, item.amount / maxCategory, C.sage);
+      textRight(catX + catW - 10, yy, pdfCompactCurrency(item.amount), 6.5, 'F2', C.ink);
+    });
+  }
+
+  text(methodX + 9, spendTop - 17, 'SPENDING CHANNELS', 6.8, 'F2', C.forest);
+  line(methodX + 9, spendTop - 24, methodX + methodW - 9, spendTop - 24, C.border);
+  const channelRows = report.spendByMethod;
+  const maxChannel = Math.max(1, ...channelRows.map(item => item.amount));
+  if (!channelRows.length) text(methodX + 9, spendTop - 45, 'No spending recorded.', 6.7, 'F1', C.muted);
+  channelRows.forEach((item, i) => {
+    const yy = spendTop - 39 - i * 14;
+    if (yy < spendTop - 95) return;
+    text(methodX + 9, yy, pdfWrap(item.label, 11, 1)[0], 6.2, 'F1', C.muted);
+    bar(methodX + 57, yy - 2, 43, 4, item.amount / maxChannel, item.label === 'Credit Card' ? C.blue : C.sage);
+    textRight(methodX + methodW - 9, yy, pdfCompactCurrency(item.amount), 5.9, 'F2', C.ink);
+  });
+  const incomeTitleY = spendTop - 103;
+  text(methodX + 9, incomeTitleY, 'INCOME RECEIVED BY', 6.5, 'F2', C.forest);
+  line(methodX + 9, incomeTitleY - 6, methodX + methodW - 9, incomeTitleY - 6, C.border);
+  report.incomeByMethod.forEach((item, i) => {
+    const yy = incomeTitleY - 20 - i * 12;
+    if (yy < spendBottom + 4) return;
+    text(methodX + 9, yy, pdfWrap(item.label, 11, 1)[0], 6.1, 'F1', C.muted);
+    textRight(methodX + methodW - 9, yy, pdfCompactCurrency(item.amount), 6.1, 'F2', C.ink);
+  });
+
+  sectionTitle(LEFT, 194, 'Outstanding balances', `Calculated as at ${report.asOfDateLabel}`);
+  const snapTop = 167, snapH = 76, snapBottom = snapTop - snapH;
+  const snapW = (CONTENT_W - 10) / 2;
+  rect(LEFT, snapBottom, snapW, snapH, C.blueLight); strokeRect(LEFT, snapBottom, snapW, snapH, C.border);
+  rect(LEFT + snapW + 10, snapBottom, snapW, snapH, C.amberLight); strokeRect(LEFT + snapW + 10, snapBottom, snapW, snapH, C.border);
+  text(LEFT + 9, snapTop - 16, 'CREDIT CARD', 7.1, 'F2', C.blue);
+  text(LEFT + snapW + 19, snapTop - 16, 'MONEY LENT', 7.1, 'F2', [0.58, 0.40, 0.18]);
+  const snapRows = (x, w, items) => items.forEach((item, i) => {
+    const yy = snapTop - 31 - i * 13;
+    text(x + 9, yy, item.label, 6.2, 'F1', C.muted);
+    textRight(x + w - 9, yy, pdfCompactCurrency(item.value), 6.2, 'F2', C.ink);
+  });
+  snapRows(LEFT, snapW, [
+    { label: 'Purchases in period', value: report.cardPurchases },
+    { label: 'Repayments in period', value: report.cardRepayments },
+    { label: 'Outstanding at period end', value: report.cardOutstanding }
+  ]);
+  snapRows(LEFT + snapW + 10, snapW, [
+    { label: 'Lent in period', value: report.moneyLent },
+    { label: 'Returned in period', value: report.loanReturned },
+    { label: 'Still owed to you', value: report.loanOutstanding }
+  ]);
+  text(LEFT, 78, 'Note: Card purchases are spending, not cash outflow until repaid. Card repayments are shown in cash flow but are not counted again as expenses.', 5.9, 'F1', C.muted);
+  text(LEFT, 68, 'Money lent is shown as a receivable, not day-to-day spending. Net cash movement is not a bank balance; no opening balance is assumed.', 5.9, 'F1', C.muted);
+  if (!report.cardOutstandingComplete || !report.loanOutstandingComplete) {
+    text(LEFT, 58, 'Undated history: a historical outstanding balance cannot be reconstructed for records whose repayment dates were not saved.', 5.7, 'F1', C.red);
+  }
+  addFooter(0);
+  finishPage();
+
+  // PAGE 2+: complete transaction register, including card purchases as a distinct non-cash entry type.
+  const rows = report.rows || [];
+  let pageNumber = 1;
+  const drawRegisterHeader = (continued = false) => {
+    startPage();
+    rect(0, 760, PAGE_W, 82, C.forest);
+    rect(0, 756, PAGE_W, 4, C.gold);
+    text(LEFT, 808, continued ? 'TRANSACTION REGISTER  |  CONTINUED' : 'TRANSACTION REGISTER', 15, 'F2', C.white);
+    text(LEFT, 789, 'Chronological record of cash movements and card purchases', 7.4, 'F1', [0.85, 0.90, 0.85]);
+    textRight(RIGHT, 790, report.period, 7, 'F2', C.white);
+    text(LEFT, 741, 'IN = money received   OUT = cash paid   CARD = credit-card purchase (not cash outflow)', 6.5, 'F1', C.muted);
+    const tableTop = 721;
+    rect(LEFT, tableTop - 24, CONTENT_W, 24, C.forest2);
+    const cols = { date: 44, description: 105, category: 260, method: 365, flow: 423, amountRight: RIGHT - 8 };
+    text(cols.date, tableTop - 15, 'DATE / TIME', 6.3, 'F2', C.white);
+    text(cols.description, tableTop - 15, 'DESCRIPTION', 6.3, 'F2', C.white);
+    text(cols.category, tableTop - 15, 'CATEGORY', 6.3, 'F2', C.white);
+    text(cols.method, tableTop - 15, 'METHOD', 6.3, 'F2', C.white);
+    text(cols.flow, tableTop - 15, 'FLOW', 6.3, 'F2', C.white);
+    textRight(cols.amountRight, tableTop - 15, 'AMOUNT (INR)', 6.3, 'F2', C.white);
+    return { y: tableTop - 35, cols };
+  };
+  let table = drawRegisterHeader(false);
+  rows.forEach((row, index) => {
+    const dateLines = pdfWrap(row.dateTime, 14, 2);
+    const descriptionLines = pdfWrap(row.description, 31, 2);
+    const categoryLines = pdfWrap(row.category, 20, 2);
+    const methodLines = pdfWrap(row.method, 14, 1);
+    const maxLines = Math.max(dateLines.length, descriptionLines.length, categoryLines.length, methodLines.length, 1);
+    const rowH = Math.max(27, maxLines * 10 + 9);
+    if (table.y - rowH < 53) {
+      addFooter(pageNumber);
+      finishPage();
+      pageNumber += 1;
+      table = drawRegisterHeader(true);
+    }
+    if (index % 2 === 1) rect(LEFT, table.y - rowH + 2, CONTENT_W, rowH, C.panel);
+    const yy = table.y - 10;
+    dateLines.forEach((lineText, lineIndex) => text(table.cols.date, yy - lineIndex * 10, lineText, 6.0, 'F1', C.muted));
+    descriptionLines.forEach((lineText, lineIndex) => text(table.cols.description, yy - lineIndex * 10, lineText, 6.5, 'F1', C.ink));
+    categoryLines.forEach((lineText, lineIndex) => text(table.cols.category, yy - lineIndex * 10, lineText, 6.1, 'F1', C.muted));
+    methodLines.forEach((lineText, lineIndex) => text(table.cols.method, yy - lineIndex * 10, lineText, 6.0, 'F1', C.muted));
+    const flowColor = row.flow === 'IN' ? C.green : (row.flow === 'CARD' ? C.blue : C.red);
+    text(table.cols.flow, yy, row.flow, 6.2, 'F2', flowColor);
+    textRight(table.cols.amountRight, yy, pdfCompactCurrency(row.amount), 6.3, 'F2', C.ink);
+    line(LEFT, table.y - rowH + 1, RIGHT, table.y - rowH + 1, C.border, 0.35);
+    table.y -= rowH;
+  });
+  addFooter(pageNumber);
+  finishPage();
+
+  // Assemble an uncompressed PDF with byte-accurate cross-reference offsets.
   const objects = [];
   const addObject = value => { objects.push(value); return objects.length; };
   const catalogId = addObject('');
@@ -1283,14 +1489,15 @@ function makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period }) {
   const regularFontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   const boldFontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
   const pageIds = [];
-  opsPages.forEach((pageOps, pageIndex) => {
-    const pageOpsWithFooter = `${pageOps}\n${footerOps(pageIndex, opsPages.length)}`;
-    const stream = `${pageOpsWithFooter}\n`;
+  pages.forEach(pageOps => {
+    const numberedPageOps = pageOps.replace(/OF __TOTAL__/g, `OF ${pages.length}`);
+    const stream = `${numberedPageOps}\n`;
     const streamLength = new TextEncoder().encode(stream).length;
     const contentId = addObject(`<< /Length ${streamLength} >>\nstream\n${stream}endstream`);
     const pageId = addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${regularFontId} 0 R /F2 ${boldFontId} 0 R >> >> /Contents ${contentId} 0 R >>`);
     pageIds.push(pageId);
   });
+  const infoId = addObject(`<< /Title (Apna Kharcha - Financial Statement) /Author (${pdfEscape(report.accountName || 'Apna Kharcha')}) /Subject (Cash flow, expense categories, credit card and lending summary) /Creator (Apna Kharcha) >>`);
   objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
   let pdf = '%PDF-1.4\n%ApnaKharcha\n';
@@ -1302,17 +1509,103 @@ function makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period }) {
   const xrefOffset = new TextEncoder().encode(pdf).length;
   pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (let i = 1; i < offsets.length; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R /Info ${infoId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   return new Blob([pdf], { type: 'application/pdf' });
+}
 
-  function footerOps(pageIndex, pageCount) {
-    const footer = [
-      `0.84 G 0.6 w ${LEFT} 38 m ${RIGHT} 38 l S`,
-      `0.4 g BT /F1 7 Tf 1 0 0 1 ${LEFT} 24 Tm (Apna Kharcha - Personal statement) Tj ET 0 g`,
-      `0.4 g BT /F1 7 Tf 1 0 0 1 ${RIGHT - 62} 24 Tm (Page ${pageIndex + 1} of ${pageCount}) Tj ET 0 g`
-    ];
-    return footer.join('\n');
-  }
+function buildStatementReport(range, start, end) {
+  const inPeriod = date => range === 'all' || (String(date || '') >= start && String(date || '') <= end);
+  const selectedTransactions = transactions.filter(tx => inPeriod(tx.date));
+  const selectedCards = creditPurchases.filter(card => inPeriod(card.date));
+  const selectedLoans = loans.filter(loan => String(loan.lentOn || '') <= (range === 'custom' ? end : localDateISO()));
+  const cashIns = selectedTransactions.filter(tx => tx.type === 'in');
+  const cashOuts = selectedTransactions.filter(tx => tx.type === 'out');
+  const cashIn = sum(cashIns, tx => tx.amount);
+  const cashOut = sum(cashOuts, tx => tx.amount);
+  const loanReturnedEntries = cashIns.filter(isLoanRepaymentEntry);
+  const incomeEntries = cashIns.filter(tx => !isLoanRepaymentEntry(tx) && !tx.excludeFromIncomeStats);
+  const loanLentEntries = cashOuts.filter(isLoanDisbursementEntry);
+  const cardRepaymentEntries = cashOuts.filter(isCardRepaymentEntry);
+  const directExpenseEntries = cashOuts.filter(isDirectExpenseEntry);
+  const loanReturned = sum(loanReturnedEntries, tx => tx.amount);
+  const incomeReceived = sum(incomeEntries, tx => tx.amount);
+  const moneyLent = sum(loanLentEntries, tx => tx.amount);
+  const cardRepayments = sum(cardRepaymentEntries, tx => tx.amount);
+  const directExpenses = sum(directExpenseEntries, tx => tx.amount);
+  const otherCashIn = Math.max(0, safeNumber(cashIn - incomeReceived - loanReturned));
+  const otherCashOut = Math.max(0, safeNumber(cashOut - directExpenses - moneyLent - cardRepayments));
+  const cardPurchases = sum(selectedCards, card => card.amount);
+  const totalSpending = safeNumber(directExpenses + cardPurchases);
+  const netCash = safeNumber(cashIn - cashOut);
+  const today = localDateISO();
+  const asOfDate = range === 'custom' ? end : today;
+
+  const categoryItems = [
+    ...directExpenseEntries.map(tx => ({ category: tx.category || 'Others', amount: tx.amount })),
+    ...selectedCards.map(card => ({ category: card.category || 'Others', amount: card.amount }))
+  ];
+  const categoryTotals = groupPdfAmounts(categoryItems, item => item.category, item => item.amount, []);
+  const spendMethodItems = [
+    ...directExpenseEntries.map(tx => ({ method: ['UPI', 'Cash', 'Other'].includes(tx.method) ? tx.method : 'Other', amount: tx.amount })),
+    ...selectedCards.map(card => ({ method: 'Credit Card', amount: card.amount }))
+  ];
+  const spendByMethod = groupPdfAmounts(spendMethodItems, item => item.method, item => item.amount, []);
+  const incomeByMethod = groupPdfAmounts(incomeEntries, tx => ['UPI', 'Cash', 'Other'].includes(tx.method) ? tx.method : 'Other', tx => tx.amount, []);
+  const cardOutstandingData = calculateOutstandingAtDate(creditPurchases, 'amount', 'date', 'payments', asOfDate, today);
+  const loanOutstandingData = calculateOutstandingAtDate(loans, 'amount', 'lentOn', 'repayments', asOfDate, today);
+
+  const rows = [
+    ...selectedTransactions.map(tx => {
+      let category = tx.category || (tx.type === 'in' ? 'Income' : 'Others');
+      if (isLoanRepaymentEntry(tx)) category = 'Loan repayment';
+      else if (isLoanDisbursementEntry(tx)) category = 'Money lent';
+      else if (isCardRepaymentEntry(tx)) category = 'Credit card payment';
+      return {
+        sortKey: `${tx.date}T${tx.time || '00:00'}`,
+        dateTime: `${formatDate(tx.date)}${tx.time ? ` ${formatTime(tx.time)}` : ''}`,
+        description: tx.title || 'Transaction',
+        category,
+        method: tx.method || 'Other',
+        flow: tx.type === 'in' ? 'IN' : 'OUT',
+        amount: safeNumber(tx.amount)
+      };
+    }),
+    ...selectedCards.map(card => ({
+      sortKey: `${card.date}T12:00`,
+      dateTime: formatDate(card.date),
+      description: `${card.title || 'Card purchase'}${card.cardName ? ` - ${card.cardName}` : ''}`,
+      category: card.category || 'Others',
+      method: 'Credit Card',
+      flow: 'CARD',
+      amount: safeNumber(card.amount)
+    }))
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  const allDates = [
+    ...transactions.map(tx => tx.date),
+    ...creditPurchases.map(card => card.date),
+    ...loans.map(loan => loan.lentOn)
+  ].filter(isValidDateISO).sort();
+  const period = range === 'custom'
+    ? `${formatDate(start)} - ${formatDate(end)}`
+    : (allDates.length ? `${formatDate(allDates[0])} - ${formatDate(today)}` : `Through ${formatDate(today)}`);
+
+  return {
+    accountName: user?.fullName || user?.name || 'Personal account',
+    generatedAt: new Date().toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    period,
+    asOfDateLabel: formatDate(asOfDate),
+    cashIn, cashOut, netCash,
+    incomeReceived, loanReturned, otherCashIn,
+    directExpenses, moneyLent, cardRepayments, otherCashOut,
+    cardPurchases, totalSpending,
+    cardOutstanding: cardOutstandingData.value,
+    cardOutstandingComplete: cardOutstandingData.complete,
+    loanOutstanding: loanOutstandingData.value,
+    loanOutstandingComplete: loanOutstandingData.complete,
+    categoryTotals, spendByMethod, incomeByMethod,
+    rows
+  };
 }
 
 $('generate-pdf-btn').addEventListener('click', () => {
@@ -1329,48 +1622,31 @@ $('generate-pdf-btn').addEventListener('click', () => {
       return;
     }
   }
-  const included = tx => range === 'all' || (tx.date >= start && tx.date <= end);
-  const includedCards = card => range === 'all' || (card.date >= start && card.date <= end);
-  const transactionRows = transactions.filter(included).map(tx => ({
-    sortKey: `${tx.date}T${tx.time || '00:00'}`,
-    dateTime: formatDateTime(tx.date, tx.time),
-    description: tx.title,
-    categoryMethod: `${tx.category || '-'} / ${tx.method || '-'}`,
-    type: tx.type === 'in' ? 'Money in' : 'Money out',
-    amountText: `${tx.type === 'in' ? '+' : '-'}${pdfCurrency(tx.amount)}`,
-    negative: tx.type !== 'in'
-  }));
-  const cardRows = creditPurchases.filter(includedCards).map(card => ({
-    sortKey: `${card.date}T23:59`,
-    dateTime: formatDate(card.date),
-    description: `${card.title} (${card.cardName})`,
-    categoryMethod: `${card.category || '-'} / Credit Card`,
-    type: 'Card purchase',
-    amountText: pdfCurrency(card.amount),
-    negative: false
-  }));
-  const rows = [...transactionRows, ...cardRows].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  if (!rows.length) {
+  let report;
+  try {
+    report = buildStatementReport(range, start, end);
+  } catch (error) {
+    console.error('Could not prepare the financial statement:', error);
+    showToast('Could not prepare the statement data. Please try again.', 'error');
+    return;
+  }
+  if (!report.rows.length) {
     showToast('No records found for this period.', 'error');
     return;
   }
-  const totalIn = sum(transactions.filter(tx => included(tx) && tx.type === 'in'), tx => tx.amount);
-  const totalOut = sum(transactions.filter(tx => included(tx) && tx.type === 'out'), tx => tx.amount);
-  const cardTotal = sum(creditPurchases.filter(includedCards), card => card.amount);
-  const period = range === 'all' ? 'All records' : `${formatDate(start)} to ${formatDate(end)}`;
   pdfButton.disabled = true;
-  closeModal('export-modal');
   try {
-    const pdfBlob = makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period });
-    const filename = `Apna_Kharcha_Statement_${(user?.name || 'Personal').replace(/[^a-z0-9_-]/gi, '_')}_${localDateISO()}.pdf`;
+    const pdfBlob = makeStatementPdf(report);
+    const accountSlug = pdfAscii(report.accountName).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'Personal';
+    const filename = `Apna_Kharcha_Financial_Report_${accountSlug}_${localDateISO()}.pdf`;
+    closeModal('export-modal');
     downloadBlob(filename, pdfBlob);
-    showToast('Statement PDF downloaded.');
+    showToast('Your detailed financial PDF is ready.');
   } catch (error) {
     console.error('PDF generation failed:', error);
     showToast('Could not generate the PDF. Please try again.', 'error');
   } finally {
     pdfButton.disabled = false;
-    closeModal('export-modal');
   }
 });
 

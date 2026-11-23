@@ -255,7 +255,7 @@
     <div class="modal">
       <div class="modal-header"><div><p class="subtle-label">YOUR RECORDS</p><h2 id="export-title">Export statement</h2></div><button class="close-btn" type="button" data-close="export-modal"><i class="ph ph-x"></i></button></div>
       <div class="export-content">
-        <p class="muted-line">Choose which transactions to include in your PDF statement.</p>
+        <p class="muted-line">Create a clear report with cash flow, expense categories, payment methods, card activity, lending balances and your complete transaction register.</p>
         <label class="radio-line"><input type="radio" name="export-range" value="all" checked> All transactions</label>
         <label class="radio-line"><input type="radio" name="export-range" value="custom"> Custom date range</label>
         <div id="export-date-range" class="form-row" hidden><div class="input-group"><label for="export-start">From</label><input type="date" id="export-start"></div><div class="input-group"><label for="export-end">To</label><input type="date" id="export-end"></div></div>
@@ -273,11 +273,11 @@
     </div>
   </div>
 
-  <script src="app.js?v=2.2.0"></script>
+  <script src="app.js?v=2.3.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=2.2.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
+        navigator.serviceWorker.register('./sw.js?v=2.3.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
       });
     }
   </script>
