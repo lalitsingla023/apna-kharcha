@@ -227,6 +227,7 @@ input:focus, select:focus { border-color: #8eae94; box-shadow: 0 0 0 3px rgba(40
 /* Forms and modals */
 .modal-overlay { display: none; position: fixed; z-index: 50; inset: 0; padding: 18px; background: rgba(18,32,23,.48); align-items: center; justify-content: center; overflow-y: auto; backdrop-filter: blur(3px); }
 .modal-overlay.active { display: flex; }
+.modal-overlay[hidden] { display: none !important; }
 .modal { background: white; width: 100%; max-width: 450px; max-height: min(90vh, 850px); overflow-y: auto; border-radius: 22px; padding: 22px; box-shadow: 0 20px 60px rgba(18,32,23,.2); animation: modal-in .2s ease-out; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(9px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }

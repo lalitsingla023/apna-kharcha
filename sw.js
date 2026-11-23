@@ -1,5 +1,5 @@
-const CACHE_NAME = 'apna-kharcha-v2-shell';
-const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png'];
+const CACHE_NAME = 'apna-kharcha-v3-modal-fix';
+const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -23,15 +23,19 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // Let external fonts/libraries use the network normally.
-  if (request.mode === 'navigate') {
+  const isAppShellAsset = request.mode === 'navigate' || ['script', 'style'].includes(request.destination) || /\/(manifest\.json|icon-192\.png)$/.test(url.pathname);
+  if (isAppShellAsset) {
     event.respondWith((async () => {
       try {
-        const fresh = await fetch(request);
-        const cache = await caches.open(CACHE_NAME);
-        cache.put('./index.html', fresh.clone());
+        const fresh = await fetch(request, { cache: 'no-store' });
+        if (fresh && fresh.ok) {
+          const cache = await caches.open(CACHE_NAME);
+          const cacheKey = request.mode === 'navigate' ? './index.html' : request;
+          await cache.put(cacheKey, fresh.clone());
+        }
         return fresh;
       } catch (error) {
-        return (await caches.match(request)) || (await caches.match('./index.html'));
+        return (await caches.match(request)) || (await caches.match('./index.html')) || new Response('', { status: 504, statusText: 'App shell unavailable offline' });
       }
     })());
     return;

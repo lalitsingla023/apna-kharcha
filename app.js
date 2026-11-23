@@ -272,15 +272,17 @@ function loadData() {
   }
 }
 function saveData() {
-  if (!user) return;
+  if (!user) return false;
   const state = { format: 'apna-kharcha-backup', version: APP_VERSION, savedAt: new Date().toISOString(), transactions, creditPurchases, loans };
   try {
     localStorage.setItem(getStorageKey('state'), JSON.stringify(state));
     // Keep the v1 transaction key in sync for safe rollback to the earlier website version.
     localStorage.setItem(getStorageKey('data'), JSON.stringify(transactions));
+    return true;
   } catch (error) {
     console.error('Could not save Apna Kharcha data:', error);
     showToast('Could not save all changes. Download a backup and free some device storage.', 'error');
+    return false;
   }
 }
 function sortByDateDesc(items, dateField = 'date') {
@@ -364,6 +366,23 @@ function updateDashboard() {
   renderLoans();
   renderReminders();
 }
+// A successful save should close its form before any optional screen redraw.
+// This prevents a rendering hiccup from leaving a modal stuck over the application.
+function refreshDashboardSafely() {
+  try {
+    updateDashboard();
+  } catch (error) {
+    console.error('Dashboard refresh failed after saving:', error);
+    showToast('Your entry was saved, but the screen could not refresh. Reopen this section to view it.', 'error');
+  }
+}
+function saveAndRefresh(closeId = null) {
+  if (!saveData()) return false;
+  if (closeId) closeModal(closeId);
+  refreshDashboardSafely();
+  return true;
+}
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -549,6 +568,7 @@ function renderLoans() {
       const repay = element('button', 'text-link', 'Record return'); repay.type = 'button'; repay.addEventListener('click', () => openLoanRepayment(loan.id)); actions.appendChild(repay);
     }
     const edit = element('button', 'mini-action', 'Edit'); edit.type = 'button'; edit.appendChild(icon('ph-pencil-simple')); edit.addEventListener('click', () => openEditLoan(loan.id)); actions.appendChild(edit);
+    const del = element('button', 'mini-action delete-action', 'Delete'); del.type = 'button'; del.appendChild(icon('ph-trash')); del.addEventListener('click', () => deleteLoan(loan.id)); actions.appendChild(del);
     bottom.appendChild(actions);
     row.appendChild(bottom);
     holder.appendChild(row);
@@ -690,7 +710,7 @@ function openTransactionModal(type) {
   $('tx-method').value = 'Other';
   $('tx-date').value = localDateISO();
   const now = new Date(); $('tx-time').value = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  txModal.classList.add('active');
+  showModal('transaction-modal');
   window.setTimeout(() => $('tx-amount').focus(), 80);
 }
 window.openTransactionModal = openTransactionModal;
@@ -710,9 +730,25 @@ function openEditTransaction(id) {
   $('tx-time').value = tx.time || '00:00';
   $('tx-category-group').hidden = tx.type === 'in';
   $('tx-category').required = tx.type === 'out';
-  txModal.classList.add('active');
+  showModal('transaction-modal');
 }
-function closeModal(id) { $(id).classList.remove('active'); }
+function showModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  document.querySelectorAll('.modal-overlay.active').forEach(open => {
+    if (open !== modal) closeModal(open.id);
+  });
+  modal.hidden = false;
+  modal.setAttribute('aria-hidden', 'false');
+  modal.classList.add('active');
+}
+function closeModal(id) {
+  const modal = $(id);
+  if (!modal) return;
+  modal.classList.remove('active');
+  modal.setAttribute('aria-hidden', 'true');
+  modal.hidden = true;
+}
 window.closeModal = () => closeModal('transaction-modal');
 txForm.addEventListener('submit', event => {
   event.preventDefault();
@@ -735,7 +771,7 @@ txForm.addEventListener('submit', event => {
     transactions.push({ id: createId('tx'), amount, title, date, time, type, category, method, categorySuggested: false });
   }
   transactions = sortByDateDesc(transactions);
-  saveData(); updateDashboard(); closeModal('transaction-modal');
+  if (!saveAndRefresh('transaction-modal')) return;
   showToast(id ? 'Transaction updated.' : (type === 'in' ? 'Money received has been recorded.' : 'Expense saved.'));
 });
 function deleteTransaction(id) {
@@ -754,7 +790,7 @@ function openCardPurchaseModal() {
   $('card-modal-title').textContent = 'Add a card purchase';
   $('cc-date').value = localDateISO();
   $('cc-card-name').value = creditPurchases[0]?.cardName || 'My Credit Card';
-  $('card-purchase-modal').classList.add('active');
+  showModal('card-purchase-modal');
 }
 function openEditCardPurchase(id) {
   const purchase = creditPurchases.find(p => p.id === id);
@@ -767,7 +803,7 @@ function openEditCardPurchase(id) {
   $('cc-category').value = purchase.category;
   $('cc-card-name').value = purchase.cardName;
   $('cc-date').value = purchase.date;
-  $('card-purchase-modal').classList.add('active');
+  showModal('card-purchase-modal');
 }
 function deleteCardPurchase(id) {
   const purchase = creditPurchases.find(p => p.id === id);
@@ -796,7 +832,7 @@ $('card-purchase-form').addEventListener('submit', event => {
   } else {
     creditPurchases.push({ id: createId('card'), amount, paidAmount: 0, title, category, cardName, date, dueDate: addDaysISO(date, 25), payments: [], createdAt: new Date().toISOString() });
   }
-  saveData(); updateDashboard(); closeModal('card-purchase-modal');
+  if (!saveAndRefresh('card-purchase-modal')) return;
   showToast(id ? 'Card purchase updated.' : 'Card purchase saved. It will be included in spending insights, not deducted from cash yet.');
 });
 function openCardPaymentModal(prefillAmount = null, targetPurchaseId = '') {
@@ -808,7 +844,7 @@ function openCardPaymentModal(prefillAmount = null, targetPurchaseId = '') {
   $('card-payment-amount').max = outstanding.toFixed(2);
   $('card-payment-amount').value = (prefillAmount ? Math.min(prefillAmount, outstanding) : outstanding).toFixed(2);
   $('card-payment-date').value = localDateISO();
-  $('card-payment-modal').classList.add('active');
+  showModal('card-payment-modal');
 }
 $('pay-card-btn').addEventListener('click', () => openCardPaymentModal());
 $('card-payment-form').addEventListener('submit', event => {
@@ -842,7 +878,7 @@ $('card-payment-form').addEventListener('submit', event => {
   });
   const paymentId = createId('cc-payment');
   transactions.push({ id: paymentId, amount, title: 'Credit card payment', date, time: `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`, type: 'out', category: 'Credit Card Payment', method, kind: 'credit-card-payment', systemManaged: true, excludeFromSpendStats: true, ccAllocations: allocations });
-  saveData(); updateDashboard(); closeModal('card-payment-modal');
+  if (!saveAndRefresh('card-payment-modal')) return;
   showToast('Card payment recorded and deducted from your available balance.');
 });
 
@@ -852,7 +888,7 @@ function openLoanModal() {
   $('loan-id').value = '';
   $('loan-modal-title').textContent = 'Record money lent';
   $('loan-date').value = localDateISO();
-  $('loan-modal').classList.add('active');
+  showModal('loan-modal');
 }
 function openEditLoan(id) {
   const loan = loans.find(item => item.id === id);
@@ -866,7 +902,7 @@ function openEditLoan(id) {
   $('loan-date').value = loan.lentOn;
   const source = transactions.find(tx => tx.id === loan.sourceTransactionId);
   $('loan-method').value = source?.method || 'Other';
-  $('loan-modal').classList.add('active');
+  showModal('loan-modal');
 }
 window.openLoanModal = openLoanModal;
 $('add-loan-btn').addEventListener('click', openLoanModal);
@@ -881,6 +917,7 @@ $('loan-form').addEventListener('submit', event => {
   if (!amount || amount <= 0 || !person || !isValidDateISO(date) || !MONEY_METHODS.includes(method)) {
     showToast('Please enter a valid amount, person, date and payment method.', 'error'); return;
   }
+  let successMessage = '';
   if (loanId) {
     const loan = loans.find(item => item.id === loanId);
     if (!loan) { showToast('Lending record could not be found.', 'error'); return; }
@@ -894,17 +931,44 @@ $('loan-form').addEventListener('submit', event => {
     loan.dueDate = addDaysISO(date, 20);
     const source = transactions.find(tx => tx.id === loan.sourceTransactionId);
     if (source) { source.amount = amount; source.title = `Money lent to ${person}`; source.date = date; source.method = method; }
-    showToast('Lending record updated. Your available balance has been recalculated.');
+    successMessage = 'Lending record updated. Your available balance has been recalculated.';
   } else {
     const newLoanId = createId('loan');
     const txId = createId('tx-loan');
     const loan = { id: newLoanId, person, note, amount, outstanding: amount, lentOn: date, dueDate: addDaysISO(date, 20), sourceTransactionId: txId, repayments: [] };
     loans.push(loan);
     transactions.push({ id: txId, amount, title: `Money lent to ${person}`, date, time: '12:00', type: 'out', category: 'Money Lent', method, kind: 'loan-disbursement', loanId: newLoanId, systemManaged: true, excludeFromSpendStats: true });
-    showToast(`Recorded. ${formatCurrency(amount)} has been deducted from your balance.`);
+    successMessage = `Recorded. ${formatCurrency(amount)} has been deducted from your balance.`;
   }
-  saveData(); updateDashboard(); closeModal('loan-modal');
+  if (!saveAndRefresh('loan-modal')) return;
+  showToast(successMessage);
 });
+function deleteLoan(id) {
+  const loan = loans.find(item => item.id === id);
+  if (!loan) return;
+
+  // Remove the original cash-out and all linked returns together so the balance
+  // and transaction ledger stay consistent when a lending record is deleted.
+  const linked = transactions.filter(tx => tx.loanId === id || tx.id === loan.sourceTransactionId);
+  const repayments = linked.filter(tx => tx.kind === 'loan-repayment');
+  const returnedAmount = sum(repayments, tx => tx.amount);
+  const confirmation = `Delete the lending record for ${loan.person}?\n\nThis removes the original ${formatCurrency(loan.amount)} lending entry and ${repayments.length} linked repayment ${repayments.length === 1 ? 'entry' : 'entries'}${returnedAmount > 0 ? ` totalling ${formatCurrency(returnedAmount)}` : ''} from your app history and balance calculation.\n\nThis cannot be undone unless you have a backup.`;
+  if (!window.confirm(confirmation)) return;
+
+  const previousLoans = loans;
+  const previousTransactions = transactions;
+  loans = loans.filter(item => item.id !== id);
+  transactions = transactions.filter(tx => tx.loanId !== id && tx.id !== loan.sourceTransactionId);
+  if (!saveData()) {
+    loans = previousLoans;
+    transactions = previousTransactions;
+    refreshDashboardSafely();
+    return;
+  }
+  refreshDashboardSafely();
+  showToast(`Lending record for ${loan.person} deleted.`);
+}
+window.deleteLoan = deleteLoan;
 function openLoanRepayment(id) {
   const loan = loans.find(item => item.id === id);
   if (!loan || loan.outstanding <= 0) return;
@@ -915,7 +979,7 @@ function openLoanRepayment(id) {
   $('repayment-amount').max = loan.outstanding.toFixed(2);
   $('repayment-amount').value = loan.outstanding.toFixed(2);
   $('repayment-date').value = localDateISO();
-  $('loan-repayment-modal').classList.add('active');
+  showModal('loan-repayment-modal');
 }
 $('loan-repayment-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -931,16 +995,20 @@ $('loan-repayment-form').addEventListener('submit', event => {
   loan.repayments = Array.isArray(loan.repayments) ? loan.repayments : [];
   loan.repayments.push({ id: createId('repay'), amount, date, method });
   transactions.push({ id: createId('tx-repay'), amount, title: `Money returned by ${loan.person}`, date, time: '12:00', type: 'in', category: 'Loan repayment', method, kind: 'loan-repayment', loanId: loan.id, systemManaged: true, excludeFromIncomeStats: true });
-  saveData(); updateDashboard(); closeModal('loan-repayment-modal');
+  if (!saveAndRefresh('loan-repayment-modal')) return;
   showToast('Repayment recorded. Your available balance has been increased.');
 });
 
 // Tabs, filters and modal controls.
 document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => changeTab(btn.dataset.tab)));
 document.querySelectorAll('[data-go-tab]').forEach(btn => btn.addEventListener('click', () => changeTab(btn.dataset.goTab)));
+document.querySelectorAll('.modal-overlay').forEach(modal => {
+  modal.hidden = true;
+  modal.setAttribute('aria-hidden', 'true');
+});
 document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => closeModal(btn.dataset.close)));
 document.querySelectorAll('.modal-overlay').forEach(overlay => overlay.addEventListener('click', event => {
-  if (event.target === overlay) overlay.classList.remove('active');
+  if (event.target === overlay) closeModal(overlay.id);
 }));
 $('insights-period').addEventListener('change', renderInsights);
 $('activity-search').addEventListener('input', renderActivity);
@@ -954,11 +1022,12 @@ function downloadBlob(filename, blob) {
   document.body.appendChild(link); link.click(); link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
-$('backup-btn').addEventListener('click', () => $('backup-modal').classList.add('active'));
+$('backup-btn').addEventListener('click', () => showModal('backup-modal'));
 $('download-backup').addEventListener('click', () => {
   const backup = { format: 'apna-kharcha-backup', version: APP_VERSION, exportedAt: new Date().toISOString(), user: { name: user?.name || '', fullName: user?.fullName || '' }, transactions, creditPurchases, loans };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
   downloadBlob(`Apna_Kharcha_Full_Backup_${user.name}_${localDateISO()}.json`, blob);
+  closeModal('backup-modal');
   showToast('Full backup downloaded. Keep it somewhere private.');
 });
 $('restore-file').addEventListener('change', async event => {
@@ -989,7 +1058,7 @@ $('restore-file').addEventListener('change', async event => {
     creditPurchases = restored.creditPurchases;
     loans = restored.loans;
     localStorage.removeItem(getStorageKey('notified'));
-    saveData(); updateDashboard(); closeModal('backup-modal');
+    if (!saveAndRefresh('backup-modal')) return;
     showToast(`Restored ${transactions.length} transactions successfully.`);
   } catch (error) {
     console.error('Restore failed:', error);
@@ -1016,7 +1085,7 @@ $('open-export-modal').addEventListener('click', () => {
   const now = new Date();
   $('export-start').value = localDateISO(new Date(now.getFullYear(), now.getMonth(), 1));
   $('export-end').value = localDateISO();
-  exportModal.classList.add('active');
+  showModal('export-modal');
 });
 document.querySelectorAll('input[name="export-range"]').forEach(radio => radio.addEventListener('change', () => {
   $('export-date-range').hidden = document.querySelector('input[name="export-range"]:checked').value !== 'custom';
@@ -1057,6 +1126,9 @@ $('generate-pdf-btn').addEventListener('click', async () => {
     tbody.appendChild(tr);
   });
   const area = $('pdf-content'); area.classList.remove('pdf-content-hidden');
+  const pdfButton = $('generate-pdf-btn');
+  pdfButton.disabled = true;
+  closeModal('export-modal');
   showToast('Preparing your statement…');
   try {
     await window.html2pdf().set({
@@ -1067,10 +1139,14 @@ $('generate-pdf-btn').addEventListener('click', async () => {
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: ['css', 'legacy'] }
     }).from(area).save();
-    closeModal('export-modal'); showToast('Statement downloaded.');
+    showToast('Statement downloaded.');
   } catch (error) {
     console.error('PDF generation failed:', error); showToast('Could not generate the PDF. Please try again.', 'error');
-  } finally { area.classList.add('pdf-content-hidden'); }
+  } finally {
+    area.classList.add('pdf-content-hidden');
+    pdfButton.disabled = false;
+    closeModal('export-modal');
+  }
 });
 
 // Boot and attempt to load an existing v1 session without disrupting its LocalStorage data.
