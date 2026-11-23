@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#050b09">
   <meta name="description" content="MONETRA is a clear, thoughtful personal finance companion for everyday spending, cash flow, card dues and money lent to friends.">
   <title>MONETRA — Personal Finance</title>
-  <link rel="manifest" href="manifest.json?v=4.0.0">
-  <link rel="apple-touch-icon" href="icon-192.png?v=4.0.0">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=4.0.0">
+  <link rel="manifest" href="manifest.json?v=4.2.0">
+  <link rel="apple-touch-icon" href="icon-192.png?v=4.2.0">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=4.2.0">
   <script>
     (function () {
       try {
@@ -24,41 +24,37 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
-  <link rel="stylesheet" href="style.css?v=4.0.0">
+  <link rel="stylesheet" href="style.css?v=4.2.0">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <section id="auth-screen" class="screen active">
     <div class="auth-card">
-      <div class="logo-container"><img src="icon-192.png?v=4.0.0" class="logo-image" alt="MONETRA app icon"></div>
+      <div class="logo-container"><img src="icon-192.png?v=4.2.0" class="logo-image" alt="MONETRA app icon"></div>
       <p class="eyebrow">PERSONAL FINANCE, MADE CLEAR</p>
       <h1>MONETRA</h1>
       <p class="auth-intro">Every rupee, thoughtfully managed.</p>
-      <form id="auth-form">
-        <input type="hidden" id="auth-mode" value="login">
-        <div class="input-group" id="display-name-group" style="display:none">
-          <label for="reg-name">Your name</label>
-          <input type="text" id="reg-name" placeholder="What should we call you?" autocomplete="name">
+      <div class="google-login-panel">
+        <p class="auth-intro">Sign in securely with your Google account.</p>
+        <button type="button" id="google-login-btn" class="btn-primary" style="display:flex;align-items:center;justify-content:center;gap:12px;width:100%;">
+          <i class="ph ph-google-logo" aria-hidden="true"></i> Continue with Google
+        </button>
+        <p class="auth-toggle-text" id="google-auth-status" role="status">Your financial records stay on this device unless you separately enable cloud sync.</p>
+        <div id="local-account-picker" style="display:none;text-align:left;margin-top:18px;">
+          <label for="existing-local-account">Choose the existing local account whose records you want to keep using</label>
+          <select id="existing-local-account" style="width:100%;margin:10px 0;padding:12px;border-radius:12px;"></select>
+          <button type="button" id="use-local-account-btn" class="btn-primary" style="width:100%;">Continue with selected records</button>
         </div>
-        <div class="input-group">
-          <label for="username">User ID</label>
-          <input type="text" id="username" placeholder="Your User ID" autocomplete="username" required>
-        </div>
-        <div class="input-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Your password" autocomplete="current-password" required minlength="6">
-        </div>
-        <button type="submit" id="auth-submit-btn" class="btn-primary">Login</button>
-        <p class="auth-toggle-text"><span id="auth-toggle-label">Don't have an account?</span> <button type="button" id="auth-toggle-btn" class="btn-text inline-text">Register here</button></p>
-      </form>
+      </div>
+      <form id="auth-form" style="display:none" aria-hidden="true"></form>
     </div>
   </section>
 
   <section id="main-screen" class="screen">
     <header class="app-header">
       <div class="brand-lockup">
-        <div class="brand-mark"><img src="icon-192.png?v=4.0.0" alt=""></div>
+        <div class="brand-mark"><img src="icon-192.png?v=4.2.0" alt=""></div>
         <div><span class="greeting">EVERY RUPEE, THOUGHTFULLY MANAGED</span><h2>MONETRA</h2></div>
       </div>
       <div class="header-actions">
@@ -321,12 +317,12 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js?v=4.1.0"></script>
-  <script src="app.js?v=4.1.0"></script>
+  <script src="supabase-config.js?v=4.2.0"></script>
+  <script src="app.js?v=4.2.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=4.0.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
+        navigator.serviceWorker.register('./sw.js?v=4.2.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
       });
     }
   </script>
