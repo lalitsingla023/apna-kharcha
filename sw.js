@@ -1,4 +1,4 @@
-const CACHE_NAME = 'apna-kharcha-v8-montera-theme';
+const CACHE_NAME = 'apna-kharcha-v9-monetra-brand';
 const APP_SHELL = [
   './',
   './index.html',
@@ -53,7 +53,7 @@ self.addEventListener('fetch', event => {
       return fresh;
     } catch (error) {
       const cached = await cache.match(request) || (request.mode === 'navigate' ? await cache.match('./index.html') : null);
-      return cached || new Response('MONTERA is unavailable offline. Reconnect and reload.', {
+      return cached || new Response('MONETRA is unavailable offline. Reconnect and reload.', {
         status: 503,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
       });
