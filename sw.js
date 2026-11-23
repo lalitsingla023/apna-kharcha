@@ -1,12 +1,12 @@
-const CACHE_NAME = 'monetra-v43-google-session';
+const CACHE_NAME = 'monetra-v44-cloud-sync';
 const APP_SHELL = [
   './',
   './index.html',
-  './style.css?v=4.3.0',
-  './app.js?v=4.3.0',
-  './manifest.json?v=4.3.0'
+  './style.css?v=4.4.0',
+  './app.js?v=4.4.0',
+  './manifest.json?v=4.4.0'
 ];
-const OPTIONAL_ASSETS = ['./icon-192.png?v=4.3.0', './icon-512.png?v=4.3.0'];
+const OPTIONAL_ASSETS = ['./icon-192.png?v=4.4.0', './icon-512.png?v=4.4.0'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {

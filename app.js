@@ -1,9 +1,9 @@
 'use strict';
 
-// MONETRA — version 4.0 (branding and appearance refresh; finance logic and storage schema retained)
-// Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
+// MONETRA v4.4 — Google sign-in with Supabase cross-device finance sync.
+// Local storage remains the offline cache; Supabase is the shared account data store.
 
-const APP_VERSION = 2;
+const APP_VERSION = 2; // Keep backup format compatible with existing v2 JSON files.
 const CATEGORIES = [
   'Food & Dining', 'Groceries', 'Travel', 'Outing & Entertainment', 'Shopping',
   'Bills & Recharge', 'Health & Medicine', 'Personal Care', 'Home & Household',
@@ -45,6 +45,14 @@ let monetraCloudUser = null;
 let authProcessingUserId = null;
 let authStartupResolved = false;
 let authStateSubscription = null;
+const MONETRA_CLOUD_TABLES = {
+  transactions: 'transactions',
+  creditPurchases: 'credit_purchases',
+  loans: 'loans'
+};
+let cloudSyncReady = false;
+let cloudSyncQueue = Promise.resolve();
+let lastCloudSyncPromise = Promise.resolve(true);
 function setGoogleStatus(message, isError = false) {
   const el = $('google-auth-status');
   if (el) { el.textContent = message; el.style.color = isError ? 'var(--danger, #c44)' : ''; }
@@ -100,8 +108,21 @@ async function finishGoogleSignIn(authUser) {
     user = { name: accountName, fullName };
     localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
     loadData();
+    try {
+      const syncResult = await initializeCloudData();
+      if (syncResult.source === 'cloud') {
+        showToast(`Loaded ${syncResult.counts.transactions} transactions and cloud records from your Google account.`);
+      } else if (syncResult.source === 'local') {
+        showToast(`Uploaded ${syncResult.counts.transactions} restored transactions to your MONETRA cloud account.`);
+      }
+      setGoogleStatus('Signed in with Google. MONETRA data is synchronized with this account across your devices.');
+    } catch (cloudError) {
+      cloudSyncReady = false;
+      console.error('MONETRA cloud data initialization:', cloudError);
+      setGoogleStatus('Google sign-in succeeded, but cloud sync needs attention: ' + (cloudError.message || 'Please reload and try again.'), true);
+      showToast('Your device data is safe, but cloud sync did not finish. ' + (cloudError.message || 'Check the cloud setup.'), 'error');
+    }
     showScreen('main');
-    setGoogleStatus('Signed in with Google. Your MONETRA session will be restored automatically when you reopen or reload this page.');
   } finally {
     authProcessingUserId = null;
     authStartupResolved = true;
@@ -172,6 +193,105 @@ async function ensureCloudProfile(authUser) {
     id: authUser.id, display_name: display, updated_at: new Date().toISOString()
   }, { onConflict: 'id' });
   if (error) throw error;
+}
+
+function currentFinanceSnapshot() {
+  return JSON.parse(JSON.stringify({ transactions, creditPurchases, loans }));
+}
+function cloudRecordData(row, index, normalizer) {
+  let value = row?.data;
+  if (typeof value === 'string') value = JSON.parse(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`A cloud record (${row?.record_id || index + 1}) has invalid data.`);
+  }
+  if (!value.id && row.record_id) value.id = row.record_id;
+  return normalizer(value, index, false);
+}
+function mergeByRecordId(localItems, cloudItems) {
+  const merged = new Map();
+  // Keep local copies for matching IDs (they may contain changes made while offline),
+  // while also adding every cloud-only record so a second device can be hydrated.
+  localItems.forEach(item => merged.set(String(item.id), item));
+  cloudItems.forEach(item => { if (!merged.has(String(item.id))) merged.set(String(item.id), item); });
+  return [...merged.values()];
+}
+async function readCloudFinanceData(authUser) {
+  if (!monetraSupabase || !authUser?.id) throw new Error('Your Google session is not ready for cloud sync.');
+  const tables = [
+    ['transactions', normalizeTransaction],
+    ['credit_purchases', normalizeCardPurchase],
+    ['loans', normalizeLoan]
+  ];
+  const result = {};
+  for (const [table, normalizer] of tables) {
+    const { data, error } = await monetraSupabase.from(table).select('record_id,data').eq('user_id', authUser.id);
+    if (error) throw new Error(`Could not read ${table}: ${error.message}`);
+    result[table] = (data || []).map((row, index) => cloudRecordData(row, index, normalizer));
+  }
+  return result;
+}
+async function syncCloudCollection(table, items, authUserId, timestamp) {
+  const { data: existing, error: readError } = await monetraSupabase
+    .from(table).select('record_id').eq('user_id', authUserId);
+  if (readError) throw new Error(`Could not inspect ${table}: ${readError.message}`);
+
+  const rows = items.map(item => ({
+    user_id: authUserId,
+    record_id: String(item.id),
+    data: item,
+    updated_at: timestamp
+  }));
+  if (rows.length) {
+    const { error } = await monetraSupabase.from(table).upsert(rows, { onConflict: 'user_id,record_id' });
+    if (error) {
+      const detail = /on conflict|unique|constraint/i.test(error.message)
+        ? ' Run MONETRA_CLOUD_SYNC_SETUP.sql once in Supabase SQL Editor, then reload.'
+        : '';
+      throw new Error(`Could not upload ${table}: ${error.message}.${detail}`);
+    }
+  }
+
+  const wanted = new Set(items.map(item => String(item.id)));
+  const stale = (existing || []).map(row => String(row.record_id)).filter(id => !wanted.has(id));
+  for (let start = 0; start < stale.length; start += 100) {
+    const batch = stale.slice(start, start + 100);
+    const { error } = await monetraSupabase.from(table).delete().eq('user_id', authUserId).in('record_id', batch);
+    if (error) throw new Error(`Could not remove replaced records from ${table}: ${error.message}`);
+  }
+}
+async function syncCloudSnapshot(snapshot) {
+  if (!monetraSupabase || !monetraCloudUser?.id) throw new Error('No active Google account is available for cloud sync.');
+  const timestamp = new Date().toISOString();
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.transactions, snapshot.transactions, monetraCloudUser.id, timestamp);
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.creditPurchases, snapshot.creditPurchases, monetraCloudUser.id, timestamp);
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.loans, snapshot.loans, monetraCloudUser.id, timestamp);
+}
+function queueCloudSync(snapshot) {
+  const operation = cloudSyncQueue.catch(() => {}).then(() => syncCloudSnapshot(snapshot));
+  cloudSyncQueue = operation;
+  return operation;
+}
+async function initializeCloudData() {
+  cloudSyncReady = false;
+  const localSnapshot = currentFinanceSnapshot();
+  const localCount = localSnapshot.transactions.length + localSnapshot.creditPurchases.length + localSnapshot.loans.length;
+  const cloud = await readCloudFinanceData(monetraCloudUser);
+  const cloudCount = cloud.transactions.length + cloud.credit_purchases.length + cloud.loans.length;
+
+  if (cloudCount > 0) {
+    transactions = sortByDateDesc(mergeByRecordId(localSnapshot.transactions, cloud.transactions));
+    creditPurchases = mergeByRecordId(localSnapshot.creditPurchases, cloud.credit_purchases);
+    loans = mergeByRecordId(localSnapshot.loans, cloud.loans);
+    if (!saveData()) throw new Error('Could not save cloud records to this device. Check available browser storage.');
+    await syncCloudSnapshot(currentFinanceSnapshot());
+    cloudSyncReady = true;
+    return { source: 'cloud', counts: { transactions: transactions.length, creditPurchases: creditPurchases.length, loans: loans.length } };
+  }
+
+  // First device after the backup restore: move its local records into the authenticated cloud account.
+  if (localCount > 0) await syncCloudSnapshot(localSnapshot);
+  cloudSyncReady = true;
+  return { source: localCount > 0 ? 'local' : 'empty', counts: { transactions: localSnapshot.transactions.length, creditPurchases: localSnapshot.creditPurchases.length, loans: localSnapshot.loans.length } };
 }
 
 const THEME_STORAGE_KEY = 'montera_theme_preference';
@@ -478,6 +598,14 @@ function saveData() {
     localStorage.setItem(getStorageKey('state'), JSON.stringify(state));
     // Keep the v1 transaction key in sync for safe rollback to the earlier website version.
     localStorage.setItem(getStorageKey('data'), JSON.stringify(transactions));
+    if (cloudSyncReady && monetraCloudUser?.id) {
+      const snapshot = currentFinanceSnapshot();
+      lastCloudSyncPromise = queueCloudSync(snapshot).then(() => true).catch(error => {
+        console.error('MONETRA cloud sync:', error);
+        showToast('Saved on this device, but cloud sync failed: ' + (error.message || 'Please reload and try again.'), 'error');
+        return false;
+      });
+    }
     return true;
   } catch (error) {
     console.error('Could not save MONETRA data:', error);
@@ -1276,7 +1404,13 @@ $('restore-file').addEventListener('change', async event => {
     loans = restored.loans;
     localStorage.removeItem(getStorageKey('notified'));
     if (!saveAndRefresh('backup-modal')) return;
-    showToast(`Restored ${transactions.length} transactions successfully.`);
+    if (cloudSyncReady) {
+      const synced = await lastCloudSyncPromise;
+      if (synced) showToast(`Restored ${transactions.length} transactions and synchronized them to your Google account.`);
+      else showToast('Backup restored on this device, but cloud sync failed. Your local records are safe; see the cloud sync error.', 'error');
+    } else {
+      showToast('Backup restored on this device. Cloud sync is not ready yet; reload after fixing the Supabase setup.', 'error');
+    }
   } catch (error) {
     console.error('Restore failed:', error);
     showToast(error.message || 'Could not restore this backup.', 'error');
