@@ -1,285 +1,286 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Apna Kharcha</title>
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#1a472a">
-    <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Icons (Phosphor Icons) -->
-    <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    
-    <!-- PDF Generation Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1f4b35">
+  <meta name="description" content="A personal money tracker for everyday spending, credit card dues and money lent to friends.">
+  <title>Apna Kharcha</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <!-- Notification Toast -->
-    <div id="toast" class="toast"></div>
-
-    <!-- Auth Screen -->
-    <div id="auth-screen" class="screen active">
-        <div class="auth-card">
-            <div class="logo-container">
-                <i class="ph ph-leaf logo-icon"></i>
-            </div>
-            <h1>Apna Kharcha</h1>
-            <p>Your Natural Expense Tracker</p>
-            
-            <form id="auth-form">
-                <input type="hidden" id="auth-mode" value="login">
-                
-                <div class="input-group" id="display-name-group" style="display: none;">
-                    <label for="reg-name">Full Name</label>
-                    <input type="text" id="reg-name" placeholder="Enter your full name">
-                </div>
-                
-                <div class="input-group">
-                    <label for="username">UserID</label>
-                    <input type="text" id="username" placeholder="e.g. john_123" required pattern="[a-zA-Z0-9_]{3,}" title="UserID must be at least 3 characters and contain only letters, numbers, and underscores">
-                </div>
-                
-                <div class="input-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" placeholder="Enter Password" required minlength="6" title="Password must be at least 6 characters">
-                </div>
-                
-                <button type="submit" id="auth-submit-btn" class="btn-primary">Login</button>
-                
-                <p class="auth-toggle-text text-muted" style="margin-top: 15px; font-size: 14px;">
-                    <span id="auth-toggle-label">Don't have an account?</span> 
-                    <button type="button" id="auth-toggle-btn" class="btn-text" style="display: inline; padding: 0;">Register here</button>
-                </p>
-            </form>
+  <section id="auth-screen" class="screen active">
+    <div class="auth-card">
+      <div class="logo-container"><i class="ph ph-wallet logo-icon"></i></div>
+      <p class="eyebrow">YOUR MONEY, IN ONE PLACE</p>
+      <h1>Apna Kharcha</h1>
+      <p class="auth-intro">A little clarity makes a big difference.</p>
+      <form id="auth-form">
+        <input type="hidden" id="auth-mode" value="login">
+        <div class="input-group" id="display-name-group" style="display:none">
+          <label for="reg-name">Your name</label>
+          <input type="text" id="reg-name" placeholder="What should we call you?" autocomplete="name">
         </div>
-    </div>
-
-    <!-- Main App Screen -->
-    <div id="main-screen" class="screen">
-        <header>
-            <div class="user-info">
-                <div class="avatar"><i class="ph ph-user"></i></div>
-                <div>
-                    <span class="greeting">Hello,</span>
-                    <h2 id="display-name">User</h2>
-                </div>
-            </div>
-            <div class="header-actions">
-                <button id="backup-btn" class="icon-btn" title="Backup/Restore Data"><i class="ph ph-cloud-arrow-up"></i></button>
-                <button id="logout-btn" class="icon-btn" title="Logout"><i class="ph ph-sign-out"></i></button>
-            </div>
-        </header>
-
-        <main>
-            <!-- Balance Card -->
-            <div class="balance-card">
-                <div class="balance-header">
-                    <span>Total Balance</span>
-                    <i class="ph ph-wallet"></i>
-                </div>
-                <h1 id="total-balance">₹0.00</h1>
-                
-                <div class="balance-stats">
-                    <div class="stat-item in">
-                        <div class="stat-icon"><i class="ph ph-arrow-down-left"></i></div>
-                        <div>
-                            <span>Income</span>
-                            <h3 id="total-in">₹0.00</h3>
-                        </div>
-                    </div>
-                    <div class="stat-item out">
-                        <div class="stat-icon"><i class="ph ph-arrow-up-right"></i></div>
-                        <div>
-                            <span>Expense</span>
-                            <h3 id="total-out">₹0.00</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Actions -->
-            <div class="action-buttons">
-                <button class="action-btn btn-in" onclick="openModal('in')">
-                    <div class="action-icon"><i class="ph ph-plus"></i></div>
-                    <span>Cash In</span>
-                </button>
-                <button class="action-btn btn-out" onclick="openModal('out')">
-                    <div class="action-icon"><i class="ph ph-minus"></i></div>
-                    <span>Cash Out</span>
-                </button>
-            </div>
-
-            <!-- Transactions Section -->
-            <div class="transactions-section">
-                <div class="section-header">
-                    <h2>Recent Transactions</h2>
-                    <button id="open-export-modal" class="btn-text"><i class="ph ph-file-pdf"></i> Statement</button>
-                </div>
-                
-                <div id="transactions-list" class="transactions-list">
-                    <!-- Transactions will be injected here -->
-                    <div class="empty-state">
-                        <i class="ph ph-receipt"></i>
-                        <p>No transactions yet</p>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Add Transaction Modal -->
-    <div id="transaction-modal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2 id="modal-title">Add Transaction</h2>
-                <button class="close-btn" onclick="closeModal()"><i class="ph ph-x"></i></button>
-            </div>
-            <form id="transaction-form">
-                <input type="hidden" id="tx-type" value="out">
-                
-                <div class="amount-input-wrapper">
-                    <span class="currency-symbol">₹</span>
-                    <input type="number" id="tx-amount" placeholder="0.00" step="0.01" required>
-                </div>
-
-                <div class="input-group">
-                    <label for="tx-title">Description</label>
-                    <input type="text" id="tx-title" placeholder="What was this for?" required>
-                </div>
-                
-                <div class="input-group" style="display: flex; gap: 10px;">
-                    <div style="flex: 1;">
-                        <label for="tx-date">Date</label>
-                        <input type="date" id="tx-date" required>
-                    </div>
-                    <div style="flex: 1;">
-                        <label for="tx-time">Time</label>
-                        <input type="time" id="tx-time" required>
-                    </div>
-                </div>
-
-                <button type="submit" id="tx-submit-btn" class="btn-primary w-full">Save Record</button>
-            </form>
+        <div class="input-group">
+          <label for="username">User ID</label>
+          <input type="text" id="username" placeholder="Your User ID" autocomplete="username" required>
         </div>
-    </div>
-
-    <!-- Backup Modal -->
-    <div id="backup-modal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Backup & Restore</h2>
-                <button class="close-btn" onclick="closeBackupModal()"><i class="ph ph-x"></i></button>
-            </div>
-            <div class="backup-content">
-                <p>Google Drive / Local Backup. Download your data to keep it safe, or restore from a previous backup file.</p>
-                
-                <button id="download-backup" class="btn-primary w-full mb-3"><i class="ph ph-download-simple"></i> Download Backup File</button>
-                
-                <div class="divider"><span>OR</span></div>
-                
-                <div class="upload-wrapper">
-                    <label for="restore-file" class="btn-secondary w-full text-center cursor-pointer">
-                        <i class="ph ph-upload-simple"></i> Restore from File
-                    </label>
-                    <input type="file" id="restore-file" accept=".json" style="display: none;">
-                </div>
-                <p class="text-xs text-center mt-2 text-muted">Restoring will overwrite current data.</p>
-            </div>
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Your password" autocomplete="current-password" required minlength="6">
         </div>
+        <button type="submit" id="auth-submit-btn" class="btn-primary">Login</button>
+        <p class="auth-toggle-text"><span id="auth-toggle-label">Don't have an account?</span> <button type="button" id="auth-toggle-btn" class="btn-text inline-text">Register here</button></p>
+      </form>
     </div>
+  </section>
 
-    <!-- Export PDF Modal -->
-    <div id="export-modal" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-header">
-                <h2>Export Statement</h2>
-                <button class="close-btn" onclick="closeExportModal()"><i class="ph ph-x"></i></button>
-            </div>
-            <div class="export-content">
-                <p class="text-muted mb-3">Select the transactions you want to include in the PDF.</p>
-                
-                <div class="export-options" style="margin-bottom: 20px;">
-                    <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; cursor: pointer;">
-                        <input type="radio" name="export-range" value="all" checked style="width: auto;"> 
-                        <span style="font-weight: 500;">All Transactions</span>
-                    </label>
-                    
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                        <input type="radio" name="export-range" value="custom" style="width: auto;"> 
-                        <span style="font-weight: 500;">Custom Date Range</span>
-                    </label>
-                </div>
-                
-                <div id="export-date-range" style="display: none; display: flex; gap: 10px; margin-bottom: 20px;">
-                    <div style="flex: 1;">
-                        <label for="export-start" style="font-size: 14px; margin-bottom: 5px; display: block;">Start Date</label>
-                        <input type="date" id="export-start">
-                    </div>
-                    <div style="flex: 1;">
-                        <label for="export-end" style="font-size: 14px; margin-bottom: 5px; display: block;">End Date</label>
-                        <input type="date" id="export-end">
-                    </div>
-                </div>
+  <section id="main-screen" class="screen">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <div class="brand-mark"><i class="ph ph-wallet"></i></div>
+        <div><span class="greeting">YOUR PERSONAL MONEY JOURNAL</span><h2>Apna Kharcha</h2></div>
+      </div>
+      <div class="header-actions">
+        <button id="notifications-btn" class="icon-btn" type="button" title="Enable reminders" aria-label="Enable reminders"><i class="ph ph-bell"></i></button>
+        <button id="backup-btn" class="icon-btn" type="button" title="Backup and restore" aria-label="Backup and restore"><i class="ph ph-cloud-arrow-up"></i></button>
+        <button id="logout-btn" class="icon-btn" type="button" title="Log out" aria-label="Log out"><i class="ph ph-sign-out"></i></button>
+      </div>
+    </header>
 
-                <button id="generate-pdf-btn" class="btn-primary w-full"><i class="ph ph-download-simple"></i> Download PDF</button>
-            </div>
+    <main>
+      <section class="welcome-row">
+        <div><p class="subtle-label">GOOD TO SEE YOU</p><h1>Hello, <span id="display-name">there</span></h1><p class="muted-line">Here is where things stand today.</p></div>
+        <div class="today-chip"><i class="ph ph-calendar-blank"></i><span id="today-label"></span></div>
+      </section>
+
+      <section class="balance-card">
+        <div class="balance-topline"><span>Available balance</span><span class="live-dot">● Updated just now</span></div>
+        <h2 id="total-balance">₹0.00</h2>
+        <p class="balance-caption">Your recorded money in hand and accounts, after cash movements.</p>
+        <div class="balance-divider"></div>
+        <div class="balance-stats">
+          <div class="balance-stat"><span><i class="ph ph-arrow-down-left"></i> Money in</span><strong id="total-in">₹0.00</strong></div>
+          <div class="balance-stat"><span><i class="ph ph-arrow-up-right"></i> Money out</span><strong id="total-out">₹0.00</strong></div>
         </div>
-    </div>
+      </section>
 
-    <!-- Hidden Printable Area for PDF -->
-    <div id="pdf-content" style="display: none;">
-        <div class="pdf-container">
-            <div class="pdf-header">
-                <h1>Apna Kharcha</h1>
-                <p>Expense Statement</p>
-            </div>
-            <div class="pdf-user-info">
-                <p><strong>User:</strong> <span id="pdf-user-name"></span></p>
-                <p><strong>Generated On:</strong> <span id="pdf-date"></span></p>
-                <p><strong>Statement Period:</strong> <span id="pdf-period"></span></p>
-            </div>
-            <div class="pdf-summary">
-                <div class="pdf-box"><strong>Total Income:</strong> <span id="pdf-total-in"></span></div>
-                <div class="pdf-box"><strong>Total Expense:</strong> <span id="pdf-total-out"></span></div>
-                <div class="pdf-box"><strong>Net Balance:</strong> <span id="pdf-net"></span></div>
-            </div>
-            <table class="pdf-table">
-                <thead>
-                    <tr>
-                        <th>Date & Time</th>
-                        <th>Description</th>
-                        <th>Type</th>
-                        <th class="text-right">Amount</th>
-                    </tr>
-                </thead>
-                <tbody id="pdf-table-body">
-                    <!-- Rows will be injected here -->
-                </tbody>
-            </table>
+      <section class="quick-actions" aria-label="Quick actions">
+        <button class="quick-action action-income" type="button" onclick="openTransactionModal('in')"><span class="quick-icon"><i class="ph ph-plus"></i></span><span><strong>Cash in</strong><small>Record money received</small></span></button>
+        <button class="quick-action action-expense" type="button" onclick="openTransactionModal('out')"><span class="quick-icon"><i class="ph ph-minus"></i></span><span><strong>Cash out</strong><small>Record an expense</small></span></button>
+        <button class="quick-action action-card" type="button" onclick="openCardPurchaseModal()"><span class="quick-icon"><i class="ph ph-credit-card"></i></span><span><strong>Card spend</strong><small>Buy now, pay later</small></span></button>
+        <button class="quick-action action-lend" type="button" onclick="openLoanModal()"><span class="quick-icon"><i class="ph ph-hand-coins"></i></span><span><strong>Lend money</strong><small>Keep track of a loan</small></span></button>
+      </section>
+
+      <nav class="tab-nav" aria-label="App sections">
+        <button type="button" class="tab-btn active" data-tab="overview"><i class="ph ph-squares-four"></i> Overview</button>
+        <button type="button" class="tab-btn" data-tab="insights"><i class="ph ph-chart-pie-slice"></i> Insights</button>
+        <button type="button" class="tab-btn" data-tab="cards"><i class="ph ph-credit-card"></i> Credit card <span id="card-tab-badge" class="nav-count" hidden>0</span></button>
+        <button type="button" class="tab-btn" data-tab="loans"><i class="ph ph-handshake"></i> Lent money <span id="loan-tab-badge" class="nav-count" hidden>0</span></button>
+        <button type="button" class="tab-btn" data-tab="activity"><i class="ph ph-list-bullets"></i> Activity</button>
+      </nav>
+
+      <section id="tab-overview" class="tab-panel active">
+        <div class="summary-grid">
+          <article class="summary-card"><div class="summary-icon spent"><i class="ph ph-chart-line-down"></i></div><span>This month's spending</span><strong id="month-spend">₹0.00</strong><small>Everyday expenses + card purchases</small></article>
+          <article class="summary-card"><div class="summary-icon due"><i class="ph ph-calendar-check"></i></div><span>Credit card outstanding</span><strong id="card-outstanding-small">₹0.00</strong><small id="card-due-small">No pending card payment</small></article>
         </div>
-    </div>
+        <section class="panel-card reminder-card" id="reminder-panel">
+          <div class="section-heading"><div><p class="subtle-label">DON'T LET IT SLIP</p><h3>Things to follow up</h3></div><span class="heading-icon"><i class="ph ph-bell-ringing"></i></span></div>
+          <div id="reminder-list" class="reminder-list"><p class="empty-inline">You are all caught up.</p></div>
+          <p class="micro-note">Reminders are checked when the app is open. Phone/browser settings affect whether a notification can be shown.</p>
+        </section>
+        <section class="panel-card">
+          <div class="section-heading"><div><p class="subtle-label">AT A GLANCE</p><h3>Where it went</h3></div><button class="text-link" type="button" data-go-tab="insights">See insights <i class="ph ph-arrow-right"></i></button></div>
+          <div id="overview-category-list" class="mini-breakdown"><p class="empty-inline">Add a few expenses to see your spending breakdown.</p></div>
+        </section>
+        <section class="panel-card">
+          <div class="section-heading"><div><p class="subtle-label">JUST RECORDED</p><h3>Recent activity</h3></div><button class="text-link" type="button" data-go-tab="activity">View all <i class="ph ph-arrow-right"></i></button></div>
+          <div id="recent-list" class="transaction-list"></div>
+        </section>
+      </section>
 
-    <script src="app.js"></script>
-    <script>
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then((reg) => console.log('Service worker registered.', reg))
-                    .catch((err) => console.log('Service worker registration failed:', err));
-            });
-        }
-    </script>
+      <section id="tab-insights" class="tab-panel">
+        <div class="panel-card insights-card">
+          <div class="section-heading insight-heading"><div><p class="subtle-label">YOUR SPENDING HABITS</p><h3>Expense breakdown</h3></div><select id="insights-period" class="compact-select" aria-label="Insights period"><option value="month">This month</option><option value="all">All time</option></select></div>
+          <p class="muted-line">Credit card purchases are counted here once. Paying the card later changes your available balance, not this spending total.</p>
+          <div id="category-breakdown" class="bar-breakdown"></div>
+        </div>
+        <div class="panel-card">
+          <div class="section-heading"><div><p class="subtle-label">HOW MONEY MOVED</p><h3>Payment methods</h3></div></div>
+          <div class="method-columns">
+            <div><h4><i class="ph ph-arrow-down-left"></i> Money received</h4><div id="income-methods" class="method-list"></div></div>
+            <div><h4><i class="ph ph-arrow-up-right"></i> Spending paid by</h4><div id="expense-methods" class="method-list"></div></div>
+          </div>
+        </div>
+        <div class="panel-card insight-note"><i class="ph ph-lightbulb"></i><p><strong>A note about your older records</strong><br>Older transactions did not have categories or payment methods. The app suggests a category from the description where it can; unclear payment methods stay as “Other”. You can edit old transactions to correct them.</p></div>
+      </section>
+
+      <section id="tab-cards" class="tab-panel">
+        <div class="debt-hero card-hero">
+          <div class="debt-hero-top"><span>Credit card balance to pay</span><span class="hero-icon"><i class="ph ph-credit-card"></i></span></div>
+          <strong id="card-outstanding">₹0.00</strong>
+          <div class="debt-hero-bottom"><span id="card-purchase-count">No card purchases yet</span><button type="button" id="pay-card-btn" class="light-action">Pay outstanding</button></div>
+        </div>
+        <div class="section-heading standalone-heading"><div><p class="subtle-label">CARD ACTIVITY</p><h3>Purchases and due dates</h3></div><button type="button" class="btn-primary btn-small" id="add-card-purchase-btn"><i class="ph ph-plus"></i> Add spend</button></div>
+        <div id="card-purchase-list" class="record-list"></div>
+        <div class="panel-card reminder-explainer"><i class="ph ph-info"></i><p>Each card purchase gets a follow-up reminder 25 days after its transaction date. This is a personal tracking reminder, not your bank's actual statement due date. Use your card issuer's due date for the real payment deadline.</p></div>
+      </section>
+
+      <section id="tab-loans" class="tab-panel">
+        <div class="debt-hero loan-hero">
+          <div class="debt-hero-top"><span>Money still owed to you</span><span class="hero-icon"><i class="ph ph-hand-coins"></i></span></div>
+          <strong id="loan-outstanding">₹0.00</strong>
+          <div class="debt-hero-bottom"><span id="loan-count">No active loans</span><button type="button" class="light-action" id="add-loan-btn">Lend money</button></div>
+        </div>
+        <div class="section-heading standalone-heading"><div><p class="subtle-label">PEOPLE TO FOLLOW UP WITH</p><h3>Your lending list</h3></div></div>
+        <div id="loan-list" class="record-list"></div>
+        <div class="panel-card reminder-explainer"><i class="ph ph-info"></i><p>Money lent is deducted from your available balance straight away. When someone returns it, record the repayment and your available balance goes back up. A reminder is due 20 days after lending.</p></div>
+      </section>
+
+      <section id="tab-activity" class="tab-panel">
+        <div class="section-heading standalone-heading"><div><p class="subtle-label">YOUR MONEY JOURNAL</p><h3>All transactions</h3></div><button type="button" id="open-export-modal" class="btn-secondary btn-small"><i class="ph ph-file-pdf"></i> Statement</button></div>
+        <div class="activity-filters"><input id="activity-search" type="search" placeholder="Search description or category" aria-label="Search transactions"><select id="activity-type" class="compact-select" aria-label="Filter transaction type"><option value="all">All activity</option><option value="in">Money in</option><option value="out">Money out</option></select></div>
+        <div id="transactions-list" class="transaction-list"></div>
+      </section>
+    </main>
+  </section>
+
+  <!-- Cash in / cash out transaction -->
+  <div id="transaction-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">MONEY JOURNAL</p><h2 id="modal-title">Add transaction</h2></div><button class="close-btn" type="button" data-close="transaction-modal" aria-label="Close"><i class="ph ph-x"></i></button></div>
+      <form id="transaction-form">
+        <input type="hidden" id="tx-id"><input type="hidden" id="tx-type" value="out">
+        <div class="amount-input-wrapper"><span>₹</span><input type="number" id="tx-amount" placeholder="0.00" step="0.01" min="0.01" inputmode="decimal" required></div>
+        <div class="input-group"><label for="tx-title">Description</label><input type="text" id="tx-title" placeholder="What was this for?" maxlength="160" required></div>
+        <div class="input-group" id="tx-category-group"><label for="tx-category">Expense category <span class="required-label">Required</span></label><select id="tx-category" required></select></div>
+        <div class="input-group"><label for="tx-method">Payment method <span class="required-label">Required</span></label><select id="tx-method" required><option value="UPI">UPI</option><option value="Cash">Cash</option><option value="Other" selected>Other</option></select></div>
+        <div class="form-row"><div class="input-group"><label for="tx-date">Date</label><input type="date" id="tx-date" required></div><div class="input-group"><label for="tx-time">Time</label><input type="time" id="tx-time" required></div></div>
+        <button type="submit" id="tx-submit-btn" class="btn-primary">Save expense</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Credit card purchase -->
+  <div id="card-purchase-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="card-modal-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">CREDIT CARD</p><h2 id="card-modal-title">Add a card purchase</h2></div><button class="close-btn" type="button" data-close="card-purchase-modal"><i class="ph ph-x"></i></button></div>
+      <form id="card-purchase-form">
+        <input type="hidden" id="cc-id">
+        <div class="amount-input-wrapper"><span>₹</span><input type="number" id="cc-amount" placeholder="0.00" step="0.01" min="0.01" required inputmode="decimal"></div>
+        <div class="input-group"><label for="cc-title">What did you buy?</label><input id="cc-title" type="text" maxlength="160" placeholder="Purchase description" required></div>
+        <div class="input-group"><label for="cc-category">Expense category</label><select id="cc-category" required></select></div>
+        <div class="input-group"><label for="cc-card-name">Card name</label><input id="cc-card-name" type="text" maxlength="60" value="My Credit Card" required></div>
+        <div class="input-group"><label for="cc-date">Transaction date</label><input id="cc-date" type="date" required></div>
+        <p class="form-hint"><i class="ph ph-bell"></i> A reminder will appear 25 days after this date. This purchase will not reduce your available balance until you record a card payment.</p>
+        <button type="submit" class="btn-primary">Save card purchase</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Credit card payment -->
+  <div id="card-payment-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="card-payment-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">SETTLE YOUR CARD</p><h2 id="card-payment-title">Record card payment</h2></div><button class="close-btn" type="button" data-close="card-payment-modal"><i class="ph ph-x"></i></button></div>
+      <form id="card-payment-form">
+        <input type="hidden" id="card-payment-target-id">
+        <div class="pay-summary"><span>Outstanding right now</span><strong id="payment-outstanding-label">₹0.00</strong></div>
+        <div class="input-group"><label for="card-payment-amount">Amount paid</label><div class="amount-input-wrapper small-amount"><span>₹</span><input type="number" id="card-payment-amount" step="0.01" min="0.01" required inputmode="decimal"></div></div>
+        <div class="input-group"><label for="card-payment-method">Paid from</label><select id="card-payment-method" required><option>UPI</option><option>Cash</option><option>Other</option></select></div>
+        <div class="input-group"><label for="card-payment-date">Payment date</label><input type="date" id="card-payment-date" required></div>
+        <p class="form-hint">This payment is deducted from your available balance and allocated to the oldest unpaid card purchases first.</p>
+        <button type="submit" class="btn-primary">Confirm payment</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Lend money -->
+  <div id="loan-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="loan-modal-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">MONEY YOU HAVE LENT</p><h2 id="loan-modal-title">Record money lent</h2></div><button class="close-btn" type="button" data-close="loan-modal"><i class="ph ph-x"></i></button></div>
+      <form id="loan-form">
+        <input type="hidden" id="loan-id">
+        <div class="amount-input-wrapper"><span>₹</span><input type="number" id="loan-amount" min="0.01" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
+        <div class="input-group"><label for="loan-person">Who did you lend it to?</label><input id="loan-person" type="text" maxlength="100" placeholder="Friend's name" required></div>
+        <div class="input-group"><label for="loan-note">Reason / note</label><input id="loan-note" type="text" maxlength="160" placeholder="Optional note"></div>
+        <div class="form-row"><div class="input-group"><label for="loan-date">Date lent</label><input id="loan-date" type="date" required></div><div class="input-group"><label for="loan-method">Paid by</label><select id="loan-method"><option>UPI</option><option>Cash</option><option>Other</option></select></div></div>
+        <p class="form-hint"><i class="ph ph-bell"></i> Your balance goes down now. A follow-up reminder is set for 20 days after the lending date.</p>
+        <button type="submit" class="btn-primary">Save lending</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Loan repayment -->
+  <div id="loan-repayment-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="repayment-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">MONEY RETURNED</p><h2 id="repayment-title">Record repayment</h2></div><button class="close-btn" type="button" data-close="loan-repayment-modal"><i class="ph ph-x"></i></button></div>
+      <form id="loan-repayment-form">
+        <input type="hidden" id="repayment-loan-id">
+        <div class="pay-summary"><span>Still owed by <strong id="repayment-person"></strong></span><strong id="repayment-outstanding">₹0.00</strong></div>
+        <div class="input-group"><label for="repayment-amount">Amount received</label><div class="amount-input-wrapper small-amount"><span>₹</span><input type="number" id="repayment-amount" min="0.01" step="0.01" required inputmode="decimal"></div></div>
+        <div class="input-group"><label for="repayment-method">Received by</label><select id="repayment-method"><option>UPI</option><option>Cash</option><option>Other</option></select></div>
+        <div class="input-group"><label for="repayment-date">Date received</label><input id="repayment-date" type="date" required></div>
+        <button type="submit" class="btn-primary">Save repayment</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Backup and restore -->
+  <div id="backup-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="backup-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">KEEP YOUR RECORDS SAFE</p><h2 id="backup-title">Backup & restore</h2></div><button class="close-btn" type="button" data-close="backup-modal"><i class="ph ph-x"></i></button></div>
+      <div class="backup-content">
+        <p class="muted-line">A backup includes transactions, categories, card purchases, lending records and payment history.</p>
+        <button id="download-backup" type="button" class="btn-primary"><i class="ph ph-download-simple"></i> Download full backup</button>
+        <div class="divider"><span>RESTORE A BACKUP</span></div>
+        <label for="restore-file" class="btn-secondary upload-button"><i class="ph ph-upload-simple"></i> Choose JSON backup</label>
+        <input type="file" id="restore-file" accept=".json,application/json" hidden>
+        <p class="form-hint">Your supplied older JSON backup (a plain list of transactions) is supported. Restore replaces the current data after confirmation.</p>
+        <p class="privacy-note"><i class="ph ph-shield-check"></i> Your data stays in this browser on this device. Keep your downloaded backup somewhere private and safe.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- PDF export -->
+  <div id="export-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <div class="modal">
+      <div class="modal-header"><div><p class="subtle-label">YOUR RECORDS</p><h2 id="export-title">Export statement</h2></div><button class="close-btn" type="button" data-close="export-modal"><i class="ph ph-x"></i></button></div>
+      <div class="export-content">
+        <p class="muted-line">Choose which transactions to include in your PDF statement.</p>
+        <label class="radio-line"><input type="radio" name="export-range" value="all" checked> All transactions</label>
+        <label class="radio-line"><input type="radio" name="export-range" value="custom"> Custom date range</label>
+        <div id="export-date-range" class="form-row" hidden><div class="input-group"><label for="export-start">From</label><input type="date" id="export-start"></div><div class="input-group"><label for="export-end">To</label><input type="date" id="export-end"></div></div>
+        <button id="generate-pdf-btn" type="button" class="btn-primary"><i class="ph ph-file-pdf"></i> Download PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pdf-content" class="pdf-content-hidden">
+    <div class="pdf-container">
+      <div class="pdf-header"><h1>Apna Kharcha</h1><p>Personal money statement</p></div>
+      <div class="pdf-user-info"><p><strong>User:</strong> <span id="pdf-user-name"></span></p><p><strong>Generated:</strong> <span id="pdf-date"></span></p><p><strong>Period:</strong> <span id="pdf-period"></span></p></div>
+      <div class="pdf-summary"><div class="pdf-box"><strong>Money in</strong><span id="pdf-total-in"></span></div><div class="pdf-box"><strong>Money out</strong><span id="pdf-total-out"></span></div><div class="pdf-box"><strong>Net cash balance</strong><span id="pdf-net"></span></div><div class="pdf-box"><strong>Card purchases</strong><span id="pdf-card-total"></span></div></div>
+      <table class="pdf-table"><thead><tr><th>Date & time</th><th>Description</th><th>Category / method</th><th>Type</th><th class="text-right">Amount</th></tr></thead><tbody id="pdf-table-body"></tbody></table>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Service worker registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>

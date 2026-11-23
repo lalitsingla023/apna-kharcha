@@ -1,50 +1,61 @@
-const CACHE_NAME = 'apna-kharcha-v1';
-const ASSETS = [
-  './',
-  './index.html',
-  './style.css',
-  './app.js',
-  './manifest.json',
-  'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap',
-  'https://unpkg.com/@phosphor-icons/web',
-  'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'
-];
+const CACHE_NAME = 'apna-kharcha-v2-shell';
+const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png'];
 
-// Install Event - Cache Assets
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    })
-  );
-  self.skipWaiting();
+self.addEventListener('install', event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // Cache only same-origin app files. A CDN outage should never prevent installation.
+    await cache.addAll(APP_SHELL);
+    await self.skipWaiting();
+  })());
 });
 
-// Activate Event - Clean old caches
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            return caches.delete(cache);
-          }
-        })
-      );
-    })
-  );
-  self.clients.claim();
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(key => key.startsWith('apna-kharcha-') && key !== CACHE_NAME).map(key => caches.delete(key)));
+    await self.clients.claim();
+  })());
 });
 
-// Fetch Event - Serve from Cache, Fallback to Network
-self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((response) => {
-      return response || fetch(e.request);
-    }).catch(() => {
-      if (e.request.mode === 'navigate') {
-        return caches.match('./index.html');
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return; // Let external fonts/libraries use the network normally.
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(request);
+        const cache = await caches.open(CACHE_NAME);
+        cache.put('./index.html', fresh.clone());
+        return fresh;
+      } catch (error) {
+        return (await caches.match(request)) || (await caches.match('./index.html'));
       }
-    })
-  );
+    })());
+    return;
+  }
+  event.respondWith((async () => {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    try {
+      const fresh = await fetch(request);
+      if (fresh && fresh.ok) (await caches.open(CACHE_NAME)).put(request, fresh.clone());
+      return fresh;
+    } catch (error) {
+      return new Response('', { status: 504, statusText: 'Offline resource unavailable' });
+    }
+  })());
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clientsList) {
+      if ('focus' in client) return client.focus();
+    }
+    if (self.clients.openWindow) return self.clients.openWindow('./');
+  })());
 });
