@@ -1,11 +1,18 @@
-const CACHE_NAME = 'apna-kharcha-v3-modal-fix';
-const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE_NAME = 'apna-kharcha-v4-modal-pdf-reliable';
+const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.json'];
+const OPTIONAL_ASSETS = ['./icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    // Cache only same-origin app files. A CDN outage should never prevent installation.
+    // Required app files must be cached; optional icons must never block an update.
     await cache.addAll(APP_SHELL);
+    await Promise.all(OPTIONAL_ASSETS.map(async path => {
+      try {
+        const response = await fetch(path, { cache: 'no-store' });
+        if (response.ok) await cache.put(path, response);
+      } catch (_) { /* optional icon not deployed yet */ }
+    }));
     await self.skipWaiting();
   })());
 });
@@ -22,33 +29,24 @@ self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return; // Let external fonts/libraries use the network normally.
-  const isAppShellAsset = request.mode === 'navigate' || ['script', 'style'].includes(request.destination) || /\/(manifest\.json|icon-192\.png)$/.test(url.pathname);
-  if (isAppShellAsset) {
-    event.respondWith((async () => {
-      try {
-        const fresh = await fetch(request, { cache: 'no-store' });
-        if (fresh && fresh.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          const cacheKey = request.mode === 'navigate' ? './index.html' : request;
-          await cache.put(cacheKey, fresh.clone());
-        }
-        return fresh;
-      } catch (error) {
-        return (await caches.match(request)) || (await caches.match('./index.html')) || new Response('', { status: 504, statusText: 'App shell unavailable offline' });
-      }
-    })());
-    return;
-  }
+  if (url.origin !== self.location.origin) return;
+
+  const isAppAsset = request.mode === 'navigate' || ['script', 'style'].includes(request.destination) ||
+    /\/(manifest\.json|icon-192\.png|icon-512\.png)$/.test(url.pathname);
+  if (!isAppAsset) return;
+
   event.respondWith((async () => {
-    const cached = await caches.match(request);
-    if (cached) return cached;
+    const cache = await caches.open(CACHE_NAME);
     try {
-      const fresh = await fetch(request);
-      if (fresh && fresh.ok) (await caches.open(CACHE_NAME)).put(request, fresh.clone());
+      const fresh = await fetch(request, { cache: 'no-store' });
+      if (fresh && fresh.ok) {
+        const key = request.mode === 'navigate' ? './index.html' : request;
+        await cache.put(key, fresh.clone());
+      }
       return fresh;
     } catch (error) {
-      return new Response('', { status: 504, statusText: 'Offline resource unavailable' });
+      return (await cache.match(request)) || (await cache.match('./index.html')) ||
+        new Response('Apna Kharcha is unavailable offline. Reconnect and reload.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     }
   })());
 });
@@ -56,10 +54,8 @@ self.addEventListener('fetch', event => {
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   event.waitUntil((async () => {
-    const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of clientsList) {
-      if ('focus' in client) return client.focus();
-    }
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) if ('focus' in client) return client.focus();
     if (self.clients.openWindow) return self.clients.openWindow('./');
   })());
 });

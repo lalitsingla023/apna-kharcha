@@ -1,6 +1,6 @@
 'use strict';
 
-// Apna Kharcha — version 2.0
+// Apna Kharcha — version 2.1 (modal + offline PDF reliability)
 // Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
 
 const APP_VERSION = 2;
@@ -734,20 +734,29 @@ function openEditTransaction(id) {
 }
 function showModal(id) {
   const modal = $(id);
-  if (!modal) return;
+  if (!modal) {
+    console.error(`Apna Kharcha: modal not found: ${id}`);
+    return false;
+  }
   document.querySelectorAll('.modal-overlay.active').forEach(open => {
     if (open !== modal) closeModal(open.id);
   });
   modal.hidden = false;
+  modal.removeAttribute('inert');
   modal.setAttribute('aria-hidden', 'false');
   modal.classList.add('active');
+  document.body.classList.add('modal-open');
+  return true;
 }
 function closeModal(id) {
-  const modal = $(id);
-  if (!modal) return;
+  const modal = typeof id === 'string' ? $(id) : id;
+  if (!modal) return false;
   modal.classList.remove('active');
   modal.setAttribute('aria-hidden', 'true');
   modal.hidden = true;
+  modal.setAttribute('inert', '');
+  if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
+  return true;
 }
 window.closeModal = () => closeModal('transaction-modal');
 txForm.addEventListener('submit', event => {
@@ -1006,21 +1015,51 @@ document.querySelectorAll('.modal-overlay').forEach(modal => {
   modal.hidden = true;
   modal.setAttribute('aria-hidden', 'true');
 });
-document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => closeModal(btn.dataset.close)));
-document.querySelectorAll('.modal-overlay').forEach(overlay => overlay.addEventListener('click', event => {
-  if (event.target === overlay) closeModal(overlay.id);
-}));
+// One capture-phase handler owns all modal dismissals. It intentionally handles clicks
+// on the close button's child icon as well as the button itself.
+document.addEventListener('click', event => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const closeButton = target.closest('[data-close]');
+  if (closeButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeModal(closeButton.getAttribute('data-close'));
+    return;
+  }
+  if (target.classList.contains('modal-overlay')) closeModal(target.id);
+}, true);
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const activeModal = document.querySelector('.modal-overlay.active');
+  if (activeModal) {
+    event.preventDefault();
+    closeModal(activeModal.id);
+  }
+});
 $('insights-period').addEventListener('change', renderInsights);
 $('activity-search').addEventListener('input', renderActivity);
 $('activity-type').addEventListener('change', renderActivity);
 
 // Backup format v2, while continuing to accept the original array-of-transactions JSON.
 function downloadBlob(filename, blob) {
+  if (!(blob instanceof Blob) || blob.size === 0) throw new Error('The file could not be prepared.');
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url; link.download = filename; link.style.display = 'none';
-  document.body.appendChild(link); link.click(); link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  link.href = url;
+  link.download = filename;
+  link.style.position = 'fixed';
+  link.style.left = '-10000px';
+  link.style.top = '0';
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    // Keep the object URL alive long enough for Android/Chrome's download manager to read it.
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
 }
 $('backup-btn').addEventListener('click', () => showModal('backup-modal'));
 $('download-backup').addEventListener('click', () => {
@@ -1078,72 +1117,250 @@ $('notifications-btn').addEventListener('click', async () => {
   } catch (error) { console.warn(error); showToast('Could not enable notifications.'); }
 });
 
-// PDF statement. User-entered values are inserted with textContent, never interpreted as HTML.
+// PDF statement. This creates a real PDF directly, without relying on a third-party CDN.
+// That keeps statement downloads available when html2pdf/canvas CDNs are blocked or offline.
 const exportModal = $('export-modal');
 $('open-export-modal').addEventListener('click', () => {
-  if (!transactions.length && !creditPurchases.length) { showToast('There are no records to export yet.', 'error'); return; }
+  if (!transactions.length && !creditPurchases.length) {
+    showToast('There are no records to export yet.', 'error');
+    return;
+  }
   const now = new Date();
   $('export-start').value = localDateISO(new Date(now.getFullYear(), now.getMonth(), 1));
   $('export-end').value = localDateISO();
   showModal('export-modal');
 });
 document.querySelectorAll('input[name="export-range"]').forEach(radio => radio.addEventListener('change', () => {
-  $('export-date-range').hidden = document.querySelector('input[name="export-range"]:checked').value !== 'custom';
+  const selected = document.querySelector('input[name="export-range"]:checked');
+  $('export-date-range').hidden = !selected || selected.value !== 'custom';
 }));
-$('generate-pdf-btn').addEventListener('click', async () => {
-  if (typeof window.html2pdf !== 'function') { showToast('PDF library is unavailable. Check your internet connection and try again.', 'error'); return; }
-  const range = document.querySelector('input[name="export-range"]:checked').value;
+
+function pdfAscii(value) {
+  return String(value ?? '')
+    .replace(/₹/g, 'INR ')
+    .replace(/[\u2012-\u2015]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2022\u00b7]/g, '-')
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, '?');
+}
+function pdfEscape(value) {
+  return pdfAscii(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+function pdfWrap(value, maxChars) {
+  const text = pdfAscii(value).trim();
+  if (!text) return ['-'];
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = '';
+  words.forEach(word => {
+    while (word.length > maxChars) {
+      if (line) { lines.push(line); line = ''; }
+      lines.push(word.slice(0, maxChars));
+      word = word.slice(maxChars);
+    }
+    if (!word) return;
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > maxChars && line) { lines.push(line); line = word; }
+    else line = next;
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : ['-'];
+}
+function pdfCurrency(value) {
+  return `INR ${safeNumber(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period }) {
+  const PAGE_W = 595.28;
+  const PAGE_H = 841.89;
+  const LEFT = 36;
+  const RIGHT = 559;
+  const opsPages = [];
+  let ops = [];
+  let y = 0;
+
+  const line = (x1, y1, x2, y2, gray = 0.82) => {
+    ops.push(`${gray} G 0.6 w ${x1} ${y1} m ${x2} ${y2} l S`);
+  };
+  const fillRect = (x, yBottom, width, height, gray) => {
+    ops.push(`${gray} g ${x} ${yBottom} ${width} ${height} re f 0 g`);
+  };
+  const text = (x, yPos, value, size = 8.5, font = 'F1', gray = 0.12) => {
+    ops.push(`${gray} g BT /${font} ${size} Tf 1 0 0 1 ${x} ${yPos} Tm (${pdfEscape(value)}) Tj ET 0 g`);
+  };
+  const addFooter = (pageIndex, pageCount) => {
+    line(LEFT, 38, RIGHT, 38, 0.84);
+    text(LEFT, 24, 'Apna Kharcha - Personal statement', 7, 'F1', 0.4);
+    text(RIGHT - 62, 24, `Page ${pageIndex + 1} of ${pageCount}`, 7, 'F1', 0.4);
+  };
+  const drawTableHeading = (continued = false) => {
+    fillRect(LEFT, y - 19, RIGHT - LEFT, 22, 0.93);
+    text(LEFT + 7, y - 11, continued ? 'TRANSACTION DETAILS (CONTINUED)' : 'TRANSACTION DETAILS', 8, 'F2', 0.22);
+    y -= 34;
+    text(LEFT + 5, y, 'DATE / TIME', 6.7, 'F2', 0.38);
+    text(125, y, 'DESCRIPTION', 6.7, 'F2', 0.38);
+    text(286, y, 'CATEGORY / METHOD', 6.7, 'F2', 0.38);
+    text(408, y, 'TYPE', 6.7, 'F2', 0.38);
+    text(490, y, 'AMOUNT', 6.7, 'F2', 0.38);
+    y -= 9;
+    line(LEFT, y, RIGHT, y, 0.68);
+    y -= 14;
+  };
+  const beginPage = (isFirst) => {
+    ops = [];
+    y = 802;
+    if (isFirst) {
+      text(LEFT, y, 'APNA KHARCHA', 19, 'F2', 0.12);
+      text(LEFT, y - 19, 'Personal money statement', 9, 'F1', 0.42);
+      text(390, y + 1, `Generated: ${new Date().toLocaleDateString('en-IN')}`, 8, 'F1', 0.35);
+      text(LEFT, y - 43, `Statement period: ${period}`, 9, 'F2', 0.2);
+      y -= 65;
+      const boxY = y - 57;
+      const boxW = 124;
+      const gap = 9;
+      const summaries = [
+        ['MONEY IN', pdfCurrency(totalIn)],
+        ['MONEY OUT', pdfCurrency(totalOut)],
+        ['NET CASH BALANCE', pdfCurrency(totalIn - totalOut)],
+        ['CARD PURCHASES', pdfCurrency(cardTotal)]
+      ];
+      summaries.forEach((item, i) => {
+        const x = LEFT + i * (boxW + gap);
+        fillRect(x, boxY, boxW, 49, i === 2 ? 0.91 : 0.96);
+        text(x + 8, boxY + 32, item[0], 6.2, 'F2', 0.42);
+        text(x + 8, boxY + 14, item[1], 8.2, 'F2', 0.16);
+      });
+      y = boxY - 25;
+    } else {
+      text(LEFT, y, 'APNA KHARCHA - TRANSACTION DETAILS', 11, 'F2', 0.16);
+      y -= 34;
+    }
+    drawTableHeading(!isFirst);
+  };
+
+  beginPage(true);
+  rows.forEach((row, rowIndex) => {
+    const dateLines = pdfWrap(row.dateTime, 17);
+    const titleLines = pdfWrap(row.description, 31);
+    const categoryLines = pdfWrap(row.categoryMethod, 21);
+    const typeLines = pdfWrap(row.type, 11);
+    const lineCount = Math.max(dateLines.length, titleLines.length, categoryLines.length, typeLines.length, 1);
+    const rowHeight = Math.max(22, lineCount * 10 + 8);
+    if (y - rowHeight < 57) {
+      opsPages.push(ops.join('\n'));
+      beginPage(false);
+    }
+    if (rowIndex % 2 === 1) fillRect(LEFT, y - rowHeight + 2, RIGHT - LEFT, rowHeight, 0.975);
+    for (let i = 0; i < lineCount; i++) {
+      const textY = y - 9 - (i * 10);
+      if (dateLines[i]) text(LEFT + 5, textY, dateLines[i], 6.8, 'F1', 0.18);
+      if (titleLines[i]) text(125, textY, titleLines[i], 7.2, 'F1', 0.13);
+      if (categoryLines[i]) text(286, textY, categoryLines[i], 6.7, 'F1', 0.28);
+      if (typeLines[i]) text(408, textY, typeLines[i], 6.7, 'F1', 0.28);
+    }
+    const amountText = pdfAscii(row.amountText);
+    text(490, y - 9, amountText, 7.1, 'F2', row.negative ? 0.32 : 0.12);
+    y -= rowHeight;
+    line(LEFT, y, RIGHT, y, 0.91);
+    y -= 3;
+  });
+  opsPages.push(ops.join('\n'));
+
+  // Write a standards-compliant, multi-page PDF using the built-in Helvetica fonts.
+  const objects = [];
+  const addObject = value => { objects.push(value); return objects.length; };
+  const catalogId = addObject('');
+  const pagesId = addObject('');
+  const regularFontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  const boldFontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  const pageIds = [];
+  opsPages.forEach((pageOps, pageIndex) => {
+    const pageOpsWithFooter = `${pageOps}\n${footerOps(pageIndex, opsPages.length)}`;
+    const stream = `${pageOpsWithFooter}\n`;
+    const streamLength = new TextEncoder().encode(stream).length;
+    const contentId = addObject(`<< /Length ${streamLength} >>\nstream\n${stream}endstream`);
+    const pageId = addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${regularFontId} 0 R /F2 ${boldFontId} 0 R >> >> /Contents ${contentId} 0 R >>`);
+    pageIds.push(pageId);
+  });
+  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+  objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+  let pdf = '%PDF-1.4\n%ApnaKharcha\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(new TextEncoder().encode(pdf).length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = new TextEncoder().encode(pdf).length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i < offsets.length; i++) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new Blob([pdf], { type: 'application/pdf' });
+
+  function footerOps(pageIndex, pageCount) {
+    const footer = [
+      `0.84 G 0.6 w ${LEFT} 38 m ${RIGHT} 38 l S`,
+      `0.4 g BT /F1 7 Tf 1 0 0 1 ${LEFT} 24 Tm (Apna Kharcha - Personal statement) Tj ET 0 g`,
+      `0.4 g BT /F1 7 Tf 1 0 0 1 ${RIGHT - 62} 24 Tm (Page ${pageIndex + 1} of ${pageCount}) Tj ET 0 g`
+    ];
+    return footer.join('\n');
+  }
+}
+
+$('generate-pdf-btn').addEventListener('click', () => {
+  const pdfButton = $('generate-pdf-btn');
+  if (pdfButton.disabled) return;
+  const selectedRange = document.querySelector('input[name="export-range"]:checked');
+  const range = selectedRange?.value || 'all';
   let start = '', end = '';
   if (range === 'custom') {
-    start = $('export-start').value; end = $('export-end').value;
-    if (!isValidDateISO(start) || !isValidDateISO(end) || start > end) { showToast('Please choose a valid date range.', 'error'); return; }
+    start = $('export-start').value;
+    end = $('export-end').value;
+    if (!isValidDateISO(start) || !isValidDateISO(end) || start > end) {
+      showToast('Please choose a valid date range.', 'error');
+      return;
+    }
   }
   const included = tx => range === 'all' || (tx.date >= start && tx.date <= end);
-  const rows = transactions.filter(included).sort((a,b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
-  const cards = creditPurchases.filter(p => range === 'all' || (p.date >= start && p.date <= end));
-  if (!rows.length && !cards.length) { showToast('No records found for this period.', 'error'); return; }
-  const totalIn = sum(rows.filter(t => t.type === 'in'), t => t.amount);
-  const totalOut = sum(rows.filter(t => t.type === 'out'), t => t.amount);
-  const cardTotal = sum(cards, c => c.amount);
-  $('pdf-user-name').textContent = user?.fullName || user?.name || '';
-  $('pdf-date').textContent = new Date().toLocaleDateString('en-IN');
-  $('pdf-period').textContent = range === 'all' ? 'All records' : `${formatDate(start)} to ${formatDate(end)}`;
-  $('pdf-total-in').textContent = formatCurrency(totalIn);
-  $('pdf-total-out').textContent = formatCurrency(totalOut);
-  $('pdf-net').textContent = formatCurrency(totalIn - totalOut);
-  $('pdf-card-total').textContent = formatCurrency(cardTotal);
-  const tbody = $('pdf-table-body'); tbody.replaceChildren();
-  rows.forEach(tx => {
-    const tr = document.createElement('tr');
-    [formatDateTime(tx.date, tx.time), tx.title, `${tx.category || '—'} / ${tx.method || '—'}`, tx.type === 'in' ? 'Money in' : 'Money out', `${tx.type === 'in' ? '+' : '−'}${formatCurrency(tx.amount)}`].forEach(value => {
-      const td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  cards.forEach(card => {
-    const tr = document.createElement('tr');
-    [formatDate(card.date), `${card.title} (${card.cardName})`, `${card.category} / Credit Card`, 'Card purchase · non-cash', formatCurrency(card.amount)].forEach(value => { const td = document.createElement('td'); td.textContent = value; tr.appendChild(td); });
-    tbody.appendChild(tr);
-  });
-  const area = $('pdf-content'); area.classList.remove('pdf-content-hidden');
-  const pdfButton = $('generate-pdf-btn');
+  const includedCards = card => range === 'all' || (card.date >= start && card.date <= end);
+  const transactionRows = transactions.filter(included).map(tx => ({
+    sortKey: `${tx.date}T${tx.time || '00:00'}`,
+    dateTime: formatDateTime(tx.date, tx.time),
+    description: tx.title,
+    categoryMethod: `${tx.category || '-'} / ${tx.method || '-'}`,
+    type: tx.type === 'in' ? 'Money in' : 'Money out',
+    amountText: `${tx.type === 'in' ? '+' : '-'}${pdfCurrency(tx.amount)}`,
+    negative: tx.type !== 'in'
+  }));
+  const cardRows = creditPurchases.filter(includedCards).map(card => ({
+    sortKey: `${card.date}T23:59`,
+    dateTime: formatDate(card.date),
+    description: `${card.title} (${card.cardName})`,
+    categoryMethod: `${card.category || '-'} / Credit Card`,
+    type: 'Card purchase',
+    amountText: pdfCurrency(card.amount),
+    negative: false
+  }));
+  const rows = [...transactionRows, ...cardRows].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  if (!rows.length) {
+    showToast('No records found for this period.', 'error');
+    return;
+  }
+  const totalIn = sum(transactions.filter(tx => included(tx) && tx.type === 'in'), tx => tx.amount);
+  const totalOut = sum(transactions.filter(tx => included(tx) && tx.type === 'out'), tx => tx.amount);
+  const cardTotal = sum(creditPurchases.filter(includedCards), card => card.amount);
+  const period = range === 'all' ? 'All records' : `${formatDate(start)} to ${formatDate(end)}`;
   pdfButton.disabled = true;
   closeModal('export-modal');
-  showToast('Preparing your statement…');
   try {
-    await window.html2pdf().set({
-      margin: 10,
-      filename: `Apna_Kharcha_Statement_${user.name}_${localDateISO()}.pdf`,
-      image: { type: 'jpeg', quality: 0.96 },
-      html2canvas: { scale: 2, logging: false, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] }
-    }).from(area).save();
-    showToast('Statement downloaded.');
+    const pdfBlob = makeStatementPdf({ rows, totalIn, totalOut, cardTotal, period });
+    const filename = `Apna_Kharcha_Statement_${(user?.name || 'Personal').replace(/[^a-z0-9_-]/gi, '_')}_${localDateISO()}.pdf`;
+    downloadBlob(filename, pdfBlob);
+    showToast('Statement PDF downloaded.');
   } catch (error) {
-    console.error('PDF generation failed:', error); showToast('Could not generate the PDF. Please try again.', 'error');
+    console.error('PDF generation failed:', error);
+    showToast('Could not generate the PDF. Please try again.', 'error');
   } finally {
-    area.classList.add('pdf-content-hidden');
     pdfButton.disabled = false;
     closeModal('export-modal');
   }

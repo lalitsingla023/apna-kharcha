@@ -227,13 +227,14 @@ input:focus, select:focus { border-color: #8eae94; box-shadow: 0 0 0 3px rgba(40
 /* Forms and modals */
 .modal-overlay { display: none; position: fixed; z-index: 50; inset: 0; padding: 18px; background: rgba(18,32,23,.48); align-items: center; justify-content: center; overflow-y: auto; backdrop-filter: blur(3px); }
 .modal-overlay.active { display: flex; }
+.modal-overlay:not(.active) { display: none; }
 .modal-overlay[hidden] { display: none !important; }
 .modal { background: white; width: 100%; max-width: 450px; max-height: min(90vh, 850px); overflow-y: auto; border-radius: 22px; padding: 22px; box-shadow: 0 20px 60px rgba(18,32,23,.2); animation: modal-in .2s ease-out; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(9px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 .modal-header .subtle-label { margin: 0 0 4px; }
 .modal-header h2 { margin: 0; font-size: 20px; letter-spacing: -.45px; }
-.close-btn { width: 32px; height: 32px; border: 0; border-radius: 10px; background: #f2f5f1; color: #667369; font-size: 18px; display: grid; place-items: center; flex: 0 0 auto; }
+.close-btn { position: relative; z-index: 2; pointer-events: auto; touch-action: manipulation; width: 38px; height: 38px; border: 0; border-radius: 10px; background: #f2f5f1; color: #667369; font-size: 18px; display: grid; place-items: center; flex: 0 0 auto; }
 .amount-input-wrapper { display: flex; align-items: center; gap: 5px; border: 1px solid #dfe8df; background: #f8faf7; border-radius: 15px; padding: 0 14px; margin-bottom: 18px; }
 .amount-input-wrapper > span { font-size: 20px; color: var(--primary); font-weight: 600; }
 .amount-input-wrapper input { border: 0; box-shadow: none !important; background: transparent; padding: 15px 4px; font-size: 25px; font-weight: 600; color: var(--primary-deep); }
@@ -309,3 +310,5 @@ input:focus, select:focus { border-color: #8eae94; box-shadow: 0 0 0 3px rgba(40
 }
 .record-actions { display: inline-flex; align-items: center; gap: 10px; }
 .suggested-pill { background: #fbf4e7; color: #9a783e; }
+
+button:disabled { opacity: .65; cursor: wait; }
