@@ -1,6 +1,6 @@
 'use strict';
 
-// Apna Kharcha — version 2.3 (designed financial statement PDF)
+// Hisab — version 3.0 (visual identity refresh; finance features and storage schema retained)
 // Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
 
 const APP_VERSION = 2;
@@ -280,7 +280,7 @@ function saveData() {
     localStorage.setItem(getStorageKey('data'), JSON.stringify(transactions));
     return true;
   } catch (error) {
-    console.error('Could not save Apna Kharcha data:', error);
+    console.error('Could not save Hisab data:', error);
     showToast('Could not save all changes. Download a backup and free some device storage.', 'error');
     return false;
   }
@@ -682,7 +682,7 @@ authForm.addEventListener('submit', (event) => {
     user = { name: userid, fullName };
     localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
     transactions = []; creditPurchases = []; loans = []; saveData();
-    showScreen('main'); showToast(`Welcome to Apna Kharcha, ${fullName}.`);
+    showScreen('main'); showToast(`Welcome to Hisab, ${fullName}.`);
   } else {
     if (!existingUsers[userid]) { showToast('User ID not found on this device.', 'error'); return; }
     if (existingUsers[userid].password !== password) { showToast('That password does not match.', 'error'); return; }
@@ -735,7 +735,7 @@ function openEditTransaction(id) {
 function showModal(id) {
   const modal = $(id);
   if (!modal) {
-    console.error(`Apna Kharcha: modal not found: ${id}`);
+    console.error(`Hisab: modal not found: ${id}`);
     return false;
   }
   document.querySelectorAll('.modal-overlay.active').forEach(open => {
@@ -1073,7 +1073,7 @@ $('backup-btn').addEventListener('click', () => showModal('backup-modal'));
 $('download-backup').addEventListener('click', () => {
   const backup = { format: 'apna-kharcha-backup', version: APP_VERSION, exportedAt: new Date().toISOString(), user: { name: user?.name || '', fullName: user?.fullName || '' }, transactions, creditPurchases, loans };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
-  downloadBlob(`Apna_Kharcha_Full_Backup_${user.name}_${localDateISO()}.json`, blob);
+  downloadBlob(`Hisab_Full_Backup_${user.name}_${localDateISO()}.json`, blob);
   closeModal('backup-modal');
   showToast('Full backup downloaded. Keep it somewhere private.');
 });
@@ -1094,7 +1094,7 @@ $('restore-file').addEventListener('change', async event => {
         loans: parsed.loans.map(normalizeLoan)
       };
     } else {
-      throw new Error('This is not a recognised Apna Kharcha backup.');
+      throw new Error('This is not a recognised Hisab or legacy Apna Kharcha backup.');
     }
     if (!restored.transactions.length) throw new Error('The backup does not contain any transactions.');
     const dates = restored.transactions.map(tx => tx.date).sort();
@@ -1286,7 +1286,7 @@ function makeStatementPdf(report) {
   };
   const addFooter = pageIndex => {
     line(LEFT, 38, RIGHT, 38, C.border, 0.65);
-    text(LEFT, 24, 'APNA KHARCHA  |  PERSONAL FINANCIAL RECORD', 6.4, 'F2', C.muted);
+    text(LEFT, 24, 'HISAB  |  PERSONAL FINANCIAL RECORD', 6.4, 'F2', C.muted);
     textRight(RIGHT, 24, `PAGE ${pageIndex + 1} OF __TOTAL__`, 6.4, 'F1', C.muted);
   };
   const startPage = () => { ops = []; };
@@ -1296,7 +1296,7 @@ function makeStatementPdf(report) {
   startPage();
   rect(0, 716, PAGE_W, 126, C.forest);
   rect(0, 712, PAGE_W, 4, C.gold);
-  text(LEFT, 798, 'APNA KHARCHA', 21, 'F2', C.white);
+  text(LEFT, 798, 'HISAB', 21, 'F2', C.white);
   text(LEFT, 780, 'PERSONAL FINANCE  |  CASH FLOW & SPENDING REPORT  |  AMOUNTS IN INR', 7.2, 'F2', [0.83, 0.88, 0.83]);
   text(LEFT, 754, `PREPARED FOR  ${pdfWrap(report.accountName || 'Personal account', 42, 1)[0]}`, 8, 'F1', C.white);
   text(LEFT, 738, `REPORT PERIOD  ${pdfWrap(report.period || 'All records', 48, 1)[0]}`, 8, 'F2', C.white);
@@ -1497,10 +1497,10 @@ function makeStatementPdf(report) {
     const pageId = addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${regularFontId} 0 R /F2 ${boldFontId} 0 R >> >> /Contents ${contentId} 0 R >>`);
     pageIds.push(pageId);
   });
-  const infoId = addObject(`<< /Title (Apna Kharcha - Financial Statement) /Author (${pdfEscape(report.accountName || 'Apna Kharcha')}) /Subject (Cash flow, expense categories, credit card and lending summary) /Creator (Apna Kharcha) >>`);
+  const infoId = addObject(`<< /Title (Hisab - Financial Statement) /Author (${pdfEscape(report.accountName || 'Hisab')}) /Subject (Cash flow, expense categories, credit card and lending summary) /Creator (Hisab) >>`);
   objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
-  let pdf = '%PDF-1.4\n%ApnaKharcha\n';
+  let pdf = '%PDF-1.4\n%Hisab\n';
   const offsets = [0];
   objects.forEach((object, index) => {
     offsets.push(new TextEncoder().encode(pdf).length);
@@ -1638,7 +1638,7 @@ $('generate-pdf-btn').addEventListener('click', () => {
   try {
     const pdfBlob = makeStatementPdf(report);
     const accountSlug = pdfAscii(report.accountName).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'Personal';
-    const filename = `Apna_Kharcha_Financial_Report_${accountSlug}_${localDateISO()}.pdf`;
+    const filename = `Hisab_Financial_Report_${accountSlug}_${localDateISO()}.pdf`;
     closeModal('export-modal');
     downloadBlob(filename, pdfBlob);
     showToast('Your detailed financial PDF is ready.');

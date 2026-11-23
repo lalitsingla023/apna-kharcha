@@ -1,12 +1,12 @@
-const CACHE_NAME = 'apna-kharcha-v6-designed-financial-pdf';
+const CACHE_NAME = 'apna-kharcha-v7-hisab-visual-refresh';
 const APP_SHELL = [
   './',
   './index.html',
-  './style.css?v=2.2.0',
-  './app.js?v=2.3.0',
-  './manifest.json'
+  './style.css?v=3.0.0',
+  './app.js?v=3.0.0',
+  './manifest.json?v=3.0.0'
 ];
-const OPTIONAL_ASSETS = ['./icon-192.png', './icon-512.png'];
+const OPTIONAL_ASSETS = ['./icon-192.png?v=3.0.0', './icon-512.png?v=3.0.0'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -53,7 +53,7 @@ self.addEventListener('fetch', event => {
       return fresh;
     } catch (error) {
       const cached = await cache.match(request) || (request.mode === 'navigate' ? await cache.match('./index.html') : null);
-      return cached || new Response('Apna Kharcha is unavailable offline. Reconnect and reload.', {
+      return cached || new Response('Hisab is unavailable offline. Reconnect and reload.', {
         status: 503,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
       });

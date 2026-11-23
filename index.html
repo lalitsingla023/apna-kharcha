@@ -3,26 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#1f4b35">
-  <meta name="description" content="A personal money tracker for everyday spending, credit card dues and money lent to friends.">
-  <title>Apna Kharcha</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="theme-color" content="#0d3727">
+  <meta name="description" content="Hisab is a calm, clear money journal for everyday spending, cash flow, card dues and money lent to friends.">
+  <title>Hisab — Money Journal</title>
+  <link rel="manifest" href="manifest.json?v=3.0.0">
+  <link rel="apple-touch-icon" href="icon-192.png?v=3.0.0">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=3.0.0">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
-  <link rel="stylesheet" href="style.css?v=2.2.0">
+  <link rel="stylesheet" href="style.css?v=3.0.0">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <section id="auth-screen" class="screen active">
     <div class="auth-card">
-      <div class="logo-container"><i class="ph ph-wallet logo-icon"></i></div>
-      <p class="eyebrow">YOUR MONEY, IN ONE PLACE</p>
-      <h1>Apna Kharcha</h1>
-      <p class="auth-intro">A little clarity makes a big difference.</p>
+      <div class="logo-container"><img src="icon-192.png?v=3.0.0" class="logo-image" alt="Hisab app icon"></div>
+      <p class="eyebrow">A PERSONAL MONEY JOURNAL</p>
+      <h1>Hisab</h1>
+      <p class="auth-intro">A little more clarity, every day.</p>
       <form id="auth-form">
         <input type="hidden" id="auth-mode" value="login">
         <div class="input-group" id="display-name-group" style="display:none">
@@ -46,8 +47,8 @@
   <section id="main-screen" class="screen">
     <header class="app-header">
       <div class="brand-lockup">
-        <div class="brand-mark"><i class="ph ph-wallet"></i></div>
-        <div><span class="greeting">YOUR PERSONAL MONEY JOURNAL</span><h2>Apna Kharcha</h2></div>
+        <div class="brand-mark"><img src="icon-192.png?v=3.0.0" alt=""></div>
+        <div><span class="greeting">PERSONAL MONEY JOURNAL</span><h2>Hisab</h2></div>
       </div>
       <div class="header-actions">
         <button id="notifications-btn" class="icon-btn" type="button" title="Enable reminders" aria-label="Enable reminders"><i class="ph ph-bell"></i></button>
@@ -65,7 +66,7 @@
       <section class="balance-card">
         <div class="balance-topline"><span>Available balance</span><span class="live-dot">● Updated just now</span></div>
         <h2 id="total-balance">₹0.00</h2>
-        <p class="balance-caption">Your recorded money in hand and accounts, after cash movements.</p>
+        <p class="balance-caption">A running picture of the money you have recorded.</p>
         <div class="balance-divider"></div>
         <div class="balance-stats">
           <div class="balance-stat"><span><i class="ph ph-arrow-down-left"></i> Money in</span><strong id="total-in">₹0.00</strong></div>
@@ -266,18 +267,18 @@
 
   <div id="pdf-content" class="pdf-content-hidden">
     <div class="pdf-container">
-      <div class="pdf-header"><h1>Apna Kharcha</h1><p>Personal money statement</p></div>
+      <div class="pdf-header"><h1>Hisab</h1><p>Personal money statement</p></div>
       <div class="pdf-user-info"><p><strong>User:</strong> <span id="pdf-user-name"></span></p><p><strong>Generated:</strong> <span id="pdf-date"></span></p><p><strong>Period:</strong> <span id="pdf-period"></span></p></div>
       <div class="pdf-summary"><div class="pdf-box"><strong>Money in</strong><span id="pdf-total-in"></span></div><div class="pdf-box"><strong>Money out</strong><span id="pdf-total-out"></span></div><div class="pdf-box"><strong>Net cash balance</strong><span id="pdf-net"></span></div><div class="pdf-box"><strong>Card purchases</strong><span id="pdf-card-total"></span></div></div>
       <table class="pdf-table"><thead><tr><th>Date & time</th><th>Description</th><th>Category / method</th><th>Type</th><th class="text-right">Amount</th></tr></thead><tbody id="pdf-table-body"></tbody></table>
     </div>
   </div>
 
-  <script src="app.js?v=2.3.0"></script>
+  <script src="app.js?v=3.0.0"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js?v=2.3.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
+        navigator.serviceWorker.register('./sw.js?v=3.0.0', { updateViaCache: 'none' }).then(reg => reg.update()).catch(err => console.warn('Service worker registration failed:', err));
       });
     }
   </script>
