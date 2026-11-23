@@ -1,6 +1,6 @@
 'use strict';
 
-// Hisab — version 3.0 (visual identity refresh; finance features and storage schema retained)
+// MONTERA — version 4.0 (branding and appearance refresh; finance logic and storage schema retained)
 // Local-first personal finance tracker. Existing v1 transaction storage is migrated in place.
 
 const APP_VERSION = 2;
@@ -37,6 +37,70 @@ const displayName = $('display-name');
 const txModal = $('transaction-modal');
 const txForm = $('transaction-form');
 const toastEl = $('toast');
+
+const THEME_STORAGE_KEY = 'montera_theme_preference';
+const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+function getThemePreference() {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return ['system', 'light', 'dark'].includes(stored) ? stored : 'system';
+  } catch (_) { return 'system'; }
+}
+
+function applyThemePreference(preference, options = {}) {
+  const safePreference = ['system', 'light', 'dark'].includes(preference) ? preference : 'system';
+  const systemDark = !!(themeMediaQuery && themeMediaQuery.matches);
+  const effectiveTheme = safePreference === 'system' ? (systemDark ? 'dark' : 'light') : safePreference;
+  const root = document.documentElement;
+  root.setAttribute('data-theme', effectiveTheme);
+  root.setAttribute('data-theme-preference', safePreference);
+  root.style.colorScheme = effectiveTheme;
+
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.setAttribute('content', effectiveTheme === 'dark' ? '#050b09' : '#f4f2eb');
+
+  document.querySelectorAll('input[name="theme-preference"]').forEach(input => {
+    input.checked = input.value === safePreference;
+    const option = input.closest('.appearance-option');
+    if (option) option.classList.toggle('selected', input.checked);
+  });
+  const appearanceButton = $('appearance-btn');
+  if (appearanceButton) {
+    const icon = appearanceButton.querySelector('i');
+    if (icon) icon.className = effectiveTheme === 'dark' ? 'ph ph-moon-stars' : 'ph ph-sun-dim';
+    appearanceButton.setAttribute('aria-label', `Appearance settings. Current theme: ${safePreference}.`);
+    appearanceButton.title = `Appearance: ${safePreference}`;
+  }
+
+  if (options.persist) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, safePreference); }
+    catch (error) { console.warn('Could not save appearance preference:', error); }
+  }
+  return effectiveTheme;
+}
+
+function bindThemePreference() {
+  applyThemePreference(getThemePreference());
+  $('appearance-btn')?.addEventListener('click', () => {
+    applyThemePreference(getThemePreference());
+    showModal('appearance-modal');
+  });
+  document.querySelectorAll('input[name="theme-preference"]').forEach(input => {
+    input.addEventListener('change', event => {
+      if (!event.target.checked) return;
+      applyThemePreference(event.target.value, { persist: true });
+      showToast(`${event.target.value === 'system' ? 'System' : event.target.value === 'dark' ? 'Dark' : 'Light'} appearance selected.`);
+    });
+  });
+  if (themeMediaQuery) {
+    const handleSystemThemeChange = () => {
+      if (getThemePreference() === 'system') applyThemePreference('system');
+    };
+    if (typeof themeMediaQuery.addEventListener === 'function') themeMediaQuery.addEventListener('change', handleSystemThemeChange);
+    else if (typeof themeMediaQuery.addListener === 'function') themeMediaQuery.addListener(handleSystemThemeChange);
+  }
+}
 
 function localDateISO(date = new Date()) {
   const y = date.getFullYear();
@@ -280,7 +344,7 @@ function saveData() {
     localStorage.setItem(getStorageKey('data'), JSON.stringify(transactions));
     return true;
   } catch (error) {
-    console.error('Could not save Hisab data:', error);
+    console.error('Could not save MONTERA data:', error);
     showToast('Could not save all changes. Download a backup and free some device storage.', 'error');
     return false;
   }
@@ -682,7 +746,7 @@ authForm.addEventListener('submit', (event) => {
     user = { name: userid, fullName };
     localStorage.setItem('apna_kharcha_user', JSON.stringify(user));
     transactions = []; creditPurchases = []; loans = []; saveData();
-    showScreen('main'); showToast(`Welcome to Hisab, ${fullName}.`);
+    showScreen('main'); showToast(`Welcome to MONTERA, ${fullName}.`);
   } else {
     if (!existingUsers[userid]) { showToast('User ID not found on this device.', 'error'); return; }
     if (existingUsers[userid].password !== password) { showToast('That password does not match.', 'error'); return; }
@@ -735,7 +799,7 @@ function openEditTransaction(id) {
 function showModal(id) {
   const modal = $(id);
   if (!modal) {
-    console.error(`Hisab: modal not found: ${id}`);
+    console.error(`MONTERA: modal not found: ${id}`);
     return false;
   }
   document.querySelectorAll('.modal-overlay.active').forEach(open => {
@@ -1073,7 +1137,7 @@ $('backup-btn').addEventListener('click', () => showModal('backup-modal'));
 $('download-backup').addEventListener('click', () => {
   const backup = { format: 'apna-kharcha-backup', version: APP_VERSION, exportedAt: new Date().toISOString(), user: { name: user?.name || '', fullName: user?.fullName || '' }, transactions, creditPurchases, loans };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
-  downloadBlob(`Hisab_Full_Backup_${user.name}_${localDateISO()}.json`, blob);
+  downloadBlob(`MONTERA_Full_Backup_${user.name}_${localDateISO()}.json`, blob);
   closeModal('backup-modal');
   showToast('Full backup downloaded. Keep it somewhere private.');
 });
@@ -1094,7 +1158,7 @@ $('restore-file').addEventListener('change', async event => {
         loans: parsed.loans.map(normalizeLoan)
       };
     } else {
-      throw new Error('This is not a recognised Hisab or legacy Apna Kharcha backup.');
+      throw new Error('This is not a recognised MONTERA or legacy Apna Kharcha backup.');
     }
     if (!restored.transactions.length) throw new Error('The backup does not contain any transactions.');
     const dates = restored.transactions.map(tx => tx.date).sort();
@@ -1286,7 +1350,7 @@ function makeStatementPdf(report) {
   };
   const addFooter = pageIndex => {
     line(LEFT, 38, RIGHT, 38, C.border, 0.65);
-    text(LEFT, 24, 'HISAB  |  PERSONAL FINANCIAL RECORD', 6.4, 'F2', C.muted);
+    text(LEFT, 24, 'MONTERA  |  PERSONAL FINANCIAL RECORD', 6.4, 'F2', C.muted);
     textRight(RIGHT, 24, `PAGE ${pageIndex + 1} OF __TOTAL__`, 6.4, 'F1', C.muted);
   };
   const startPage = () => { ops = []; };
@@ -1296,7 +1360,7 @@ function makeStatementPdf(report) {
   startPage();
   rect(0, 716, PAGE_W, 126, C.forest);
   rect(0, 712, PAGE_W, 4, C.gold);
-  text(LEFT, 798, 'HISAB', 21, 'F2', C.white);
+  text(LEFT, 798, 'MONTERA', 21, 'F2', C.white);
   text(LEFT, 780, 'PERSONAL FINANCE  |  CASH FLOW & SPENDING REPORT  |  AMOUNTS IN INR', 7.2, 'F2', [0.83, 0.88, 0.83]);
   text(LEFT, 754, `PREPARED FOR  ${pdfWrap(report.accountName || 'Personal account', 42, 1)[0]}`, 8, 'F1', C.white);
   text(LEFT, 738, `REPORT PERIOD  ${pdfWrap(report.period || 'All records', 48, 1)[0]}`, 8, 'F2', C.white);
@@ -1497,10 +1561,10 @@ function makeStatementPdf(report) {
     const pageId = addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 ${regularFontId} 0 R /F2 ${boldFontId} 0 R >> >> /Contents ${contentId} 0 R >>`);
     pageIds.push(pageId);
   });
-  const infoId = addObject(`<< /Title (Hisab - Financial Statement) /Author (${pdfEscape(report.accountName || 'Hisab')}) /Subject (Cash flow, expense categories, credit card and lending summary) /Creator (Hisab) >>`);
+  const infoId = addObject(`<< /Title (MONTERA - Financial Statement) /Author (${pdfEscape(report.accountName || 'MONTERA')}) /Subject (Cash flow, expense categories, credit card and lending summary) /Creator (MONTERA) >>`);
   objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
-  let pdf = '%PDF-1.4\n%Hisab\n';
+  let pdf = '%PDF-1.4\n%MONTERA\n';
   const offsets = [0];
   objects.forEach((object, index) => {
     offsets.push(new TextEncoder().encode(pdf).length);
@@ -1638,7 +1702,7 @@ $('generate-pdf-btn').addEventListener('click', () => {
   try {
     const pdfBlob = makeStatementPdf(report);
     const accountSlug = pdfAscii(report.accountName).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'Personal';
-    const filename = `Hisab_Financial_Report_${accountSlug}_${localDateISO()}.pdf`;
+    const filename = `MONTERA_Financial_Report_${accountSlug}_${localDateISO()}.pdf`;
     closeModal('export-modal');
     downloadBlob(filename, pdfBlob);
     showToast('Your detailed financial PDF is ready.');
@@ -1652,6 +1716,7 @@ $('generate-pdf-btn').addEventListener('click', () => {
 
 // Boot and attempt to load an existing v1 session without disrupting its LocalStorage data.
 function init() {
+  bindThemePreference();
   setInitialFormOptions();
   setTodayDefaults();
   const storedUser = localStorage.getItem('apna_kharcha_user');

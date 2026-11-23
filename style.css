@@ -685,3 +685,221 @@ input::placeholder { color: #aab2a9; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
+/* ================================================================
+   MONTERA brand refresh — emerald, graphite and warm paper.
+   Existing component structure and finance workflows are unchanged.
+   ================================================================ */
+:root {
+  --primary: #008b61;
+  --primary-deep: #063d2c;
+  --primary-soft: #e3f5ed;
+  --sage: #9bcdb7;
+  --success: #078b5f;
+  --success-bg: #e5f5ed;
+  --radius-lg: 25px;
+}
+body {
+  background:
+    radial-gradient(ellipse at 92% 0%, rgba(0, 185, 125, .075), transparent 34rem),
+    var(--bg);
+}
+.logo-container, .brand-mark {
+  background: #030a08;
+  border-color: rgba(0, 185, 125, .16);
+}
+.auth-card h1, .brand-lockup h2 { letter-spacing: -.8px; }
+.auth-card h1 { font-size: 32px; }
+.brand-lockup h2 { font-size: 22px; letter-spacing: -.45px; }
+.brand-lockup .greeting { letter-spacing: .72px; }
+.balance-card {
+  background: linear-gradient(125deg, #03150f 0%, #06452f 59%, #087a54 100%);
+  box-shadow: 0 18px 38px rgba(0, 67, 44, .19);
+}
+.btn-primary { background: #06432f; }
+.btn-primary:hover { background: #075c40; }
+.btn-secondary { color: #06764f; background: #e8f5ee; border-color: #d4eadd; }
+.tab-btn.active { background: #06432f; }
+.welcome-row h1 span { color: #008b61; }
+.action-income .quick-icon { color: #078b5f; background: #e5f5ed; }
+.appearance-modal { max-width: 470px; }
+.appearance-intro { margin: -5px 0 18px; }
+.appearance-options { display: grid; gap: 10px; }
+.appearance-option {
+  position: relative; display: grid; grid-template-columns: 44px minmax(0,1fr) 22px;
+  gap: 12px; align-items: center; padding: 12px 13px; border: 1px solid var(--border);
+  border-radius: 15px; background: var(--surface); cursor: pointer; transition: border-color .18s, background .18s, box-shadow .18s;
+}
+.appearance-option:hover { border-color: #9acbb5; }
+.appearance-option input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 1px; pointer-events: none; }
+.appearance-swatch {
+  width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
+  font-size: 19px; border: 1px solid rgba(0,0,0,.06);
+}
+.swatch-system { color: #0a6b4a; background: linear-gradient(135deg,#f5f2e9 0 50%,#111d18 50% 100%); }
+.swatch-light { color: #08764f; background: #edf5ed; }
+.swatch-dark { color: #45d49b; background: #101a16; }
+.appearance-option-copy { display: grid; gap: 2px; }
+.appearance-option-copy strong { color: var(--text); font-size: 13px; font-weight: 750; }
+.appearance-option-copy small { color: var(--muted); font-size: 11px; }
+.option-check { color: #0aa36f; font-size: 19px; opacity: 0; }
+.appearance-option.selected { border-color: #0aa36f; background: var(--primary-soft); box-shadow: 0 0 0 2px rgba(0,163,111,.08); }
+.appearance-option.selected .option-check { opacity: 1; }
+.appearance-option:focus-within { outline: 3px solid rgba(0,163,111,.2); outline-offset: 2px; }
+.appearance-note { display: flex; gap: 8px; align-items: flex-start; margin: 16px 0 0; padding: 11px 12px; border-radius: 12px; color: var(--muted); background: var(--surface-soft); font-size: 10px; line-height: 1.55; }
+.appearance-note i { color: var(--primary); font-size: 15px; flex: 0 0 auto; }
+
+/* Dark appearance — all core surfaces, fields, records and dialogs. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: #39d69b;
+  --primary-deep: #0b6748;
+  --primary-soft: #15392c;
+  --sage: #7db99c;
+  --bg: #0b110f;
+  --surface: #141d19;
+  --surface-soft: #19241f;
+  --text: #e8f1eb;
+  --muted: #9baaa1;
+  --border: #2b3932;
+  --success: #55d69a;
+  --success-bg: #173b2c;
+  --danger: #f08d80;
+  --danger-bg: #3c2522;
+  --amber: #dcb978;
+  --amber-bg: #382f20;
+  --shadow: 0 14px 34px rgba(0,0,0,.22);
+  --shadow-soft: 0 5px 18px rgba(0,0,0,.16);
+}
+html[data-theme="dark"] body {
+  color: var(--text);
+  background: radial-gradient(ellipse at 92% 0%, rgba(0,185,125,.075), transparent 34rem), var(--bg);
+}
+html[data-theme="dark"] #auth-screen {
+  background: radial-gradient(circle at 14% 16%, rgba(0,185,125,.13), transparent 34%),
+              radial-gradient(circle at 90% 84%, rgba(25,76,57,.16), transparent 30%), var(--bg);
+}
+html[data-theme="dark"] .auth-card,
+html[data-theme="dark"] .summary-card,
+html[data-theme="dark"] .panel-card,
+html[data-theme="dark"] .quick-action,
+html[data-theme="dark"] .tab-nav,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .appearance-option {
+  color: var(--text); background: var(--surface); border-color: var(--border);
+  box-shadow: 0 7px 22px rgba(0,0,0,.16);
+}
+html[data-theme="dark"] .auth-card { border-color: #2a3a32; }
+html[data-theme="dark"] .auth-card h1,
+html[data-theme="dark"] .brand-lockup h2,
+html[data-theme="dark"] .section-heading h3,
+html[data-theme="dark"] .modal-header h2,
+html[data-theme="dark"] .transaction-title,
+html[data-theme="dark"] .quick-action strong,
+html[data-theme="dark"] .summary-card > strong,
+html[data-theme="dark"] .record-title,
+html[data-theme="dark"] .appearance-option-copy strong { color: var(--text); }
+html[data-theme="dark"] .auth-intro,
+html[data-theme="dark"] .muted-line,
+html[data-theme="dark"] .quick-action small,
+html[data-theme="dark"] .summary-card > span,
+html[data-theme="dark"] .summary-card > small,
+html[data-theme="dark"] .empty-inline,
+html[data-theme="dark"] .empty-state,
+html[data-theme="dark"] .transaction-meta,
+html[data-theme="dark"] .record-subtitle,
+html[data-theme="dark"] .record-foot,
+html[data-theme="dark"] .appearance-option-copy small { color: var(--muted); }
+html[data-theme="dark"] .eyebrow,
+html[data-theme="dark"] .subtle-label,
+html[data-theme="dark"] .brand-lockup .greeting { color: #92a69a; }
+html[data-theme="dark"] .input-group label { color: #c0cec5; }
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  color: var(--text); background: #101a15; border-color: #34453b;
+}
+html[data-theme="dark"] input::placeholder { color: #7f9086; }
+html[data-theme="dark"] input:focus,
+html[data-theme="dark"] select:focus,
+html[data-theme="dark"] textarea:focus { background: #15221b; border-color: #248f66; box-shadow: 0 0 0 4px rgba(44,190,131,.12); }
+html[data-theme="dark"] .app-header {
+  background: rgba(11,17,15,.91); border-bottom-color: #293830;
+}
+html[data-theme="dark"] .brand-mark,
+html[data-theme="dark"] .logo-container { border-color: rgba(54,214,155,.2); }
+html[data-theme="dark"] .icon-btn { color: #d1ded6; background: #17221c; border-color: #304037; box-shadow: none; }
+html[data-theme="dark"] .icon-btn:hover { color: #55d69a; background: #1b2b22; border-color: #3a5c49; }
+html[data-theme="dark"] .welcome-row h1 span { color: #43d49a; }
+html[data-theme="dark"] .today-chip { color: #c3d1c8; background: #1b2921; border-color: #304237; }
+html[data-theme="dark"] .balance-card { background: linear-gradient(125deg,#03150f 0%,#06452f 59%,#087a54 100%); }
+html[data-theme="dark"] .quick-action { border-color: #2b3932; }
+html[data-theme="dark"] .quick-action:hover { border-color: #3a6a51; box-shadow: 0 9px 22px rgba(0,0,0,.2); }
+html[data-theme="dark"] .action-income .quick-icon { color: #68dba6; background: #173b2c; }
+html[data-theme="dark"] .action-expense .quick-icon { color: #f39a8e; background: #3b2623; }
+html[data-theme="dark"] .action-card .quick-icon { color: #9bb9da; background: #233244; }
+html[data-theme="dark"] .action-lend .quick-icon { color: #e0c17e; background: #3a3020; }
+html[data-theme="dark"] .tab-nav { border-color: #2b3932; }
+html[data-theme="dark"] .tab-btn { color: #a5b3aa; }
+html[data-theme="dark"] .tab-btn:hover { color: #e8f1eb; background: #1b2a22; }
+html[data-theme="dark"] .tab-btn.active { color: #052417; background: #42d59a; box-shadow: none; }
+html[data-theme="dark"] .tab-btn.active .nav-count { color: #09291c; background: #f0d29a; }
+html[data-theme="dark"] .summary-icon.spent { color: #f39a8e; background: #3b2623; }
+html[data-theme="dark"] .summary-icon.due { color: #9bb9da; background: #233244; }
+html[data-theme="dark"] .heading-icon { color: #dfc17f; background: #392f20; }
+html[data-theme="dark"] .bar-track { background: #2a3931; }
+html[data-theme="dark"] .category-rank { color: #c5d5ca; background: #26352c; }
+html[data-theme="dark"] .category-percent { color: #9eada3; }
+html[data-theme="dark"] .compact-select { color: var(--text); background-color: #18251e; }
+html[data-theme="dark"] .method-columns h4 { color: #bdcbc2; }
+html[data-theme="dark"] .insight-note,
+html[data-theme="dark"] .reminder-explainer { background: #19251f; border-color: #2d3e34; }
+html[data-theme="dark"] .insight-note p,
+html[data-theme="dark"] .reminder-explainer p { color: #a8b6ad; }
+html[data-theme="dark"] .transaction-row { border-color: #293830; }
+html[data-theme="dark"] .symbol-income { color: #67d9a3; background: #173b2c; }
+html[data-theme="dark"] .symbol-expense { color: #f39a8e; background: #3b2623; }
+html[data-theme="dark"] .meta-pill { color: #c0cec5; background: #26352c; }
+html[data-theme="dark"] .method-pill,
+html[data-theme="dark"] .system-tag { color: #aab8af; background: #202c25; }
+html[data-theme="dark"] .mini-action { color: #b7c6bd; }
+html[data-theme="dark"] .delete-action { color: #f0978b; }
+html[data-theme="dark"] .reminder-content strong { color: #e5eee8; }
+html[data-theme="dark"] .reminder-content small { color: #a1afa6; }
+html[data-theme="dark"] .overdue-pill { color: #ffb5a9; background: #402824; }
+html[data-theme="dark"] .record-card { background: #141e19; border-color: #2c3b33; }
+html[data-theme="dark"] .record-bottom { border-color: #2c3b33; }
+html[data-theme="dark"] .record-bottom .muted-line { color: #a6b4ab; }
+html[data-theme="dark"] .status-paid { color: #72dfa9; background: #173b2c; }
+html[data-theme="dark"] .status-pending { color: #e6c77f; background: #3a3020; }
+html[data-theme="dark"] .status-due { color: #f19a8d; background: #402824; }
+html[data-theme="dark"] .modal-overlay { background: rgba(0,0,0,.68); }
+html[data-theme="dark"] .modal { border-color: #2d3b33; box-shadow: 0 24px 75px rgba(0,0,0,.45); }
+html[data-theme="dark"] .modal-header h2 { color: #edf5ef; }
+html[data-theme="dark"] .close-btn { color: #bdcbc2; background: #202c25; border-color: #35453b; }
+html[data-theme="dark"] .close-btn:hover { color: #5be0a4; background: #26392e; border-color: #3f6c52; }
+html[data-theme="dark"] .amount-input-wrapper { background: #17231c; border-color: #33443a; }
+html[data-theme="dark"] .amount-input-wrapper > span { color: #56dba1; }
+html[data-theme="dark"] .form-hint { color: #a6b4ab; background: #1b2921; }
+html[data-theme="dark"] .required-label { color: #e0c17e; }
+html[data-theme="dark"] .pay-summary { color: #dbe7df; background: #1b2921; }
+html[data-theme="dark"] .privacy-note { color: #b0beb5; background: #1b2921; }
+html[data-theme="dark"] .radio-line { color: #d6e2da; }
+html[data-theme="dark"] .appearance-note { color: #a9b7ae; background: #1b2921; }
+html[data-theme="dark"] .appearance-option.selected { background: #15392c; border-color: #35c98f; }
+html[data-theme="dark"] .toast { color: #e8f1eb; background: #18251e; border: 1px solid #35483c; }
+html[data-theme="dark"] .toast.success { border-color: #286447; }
+html[data-theme="dark"] .toast.error { border-color: #75453e; }
+html[data-theme="dark"] .divider { border-color: #304037; }
+html[data-theme="dark"] .divider span { color: #a5b3aa; background: var(--surface); }
+html[data-theme="dark"] .micro-note { color: #95a49a; border-color: #2a3931; }
+html[data-theme="dark"] .empty-state i { color: #7e9988; }
+html[data-theme="dark"] .btn-secondary { color: #9ee7c4; background: #18372a; border-color: #2c6046; }
+html[data-theme="dark"] .btn-secondary:hover { background: #204532; }
+html[data-theme="dark"] .btn-primary { color: #f5fff9; background: #086244; }
+html[data-theme="dark"] .btn-primary:hover { background: #0a7953; }
+html[data-theme="dark"] .tab-btn.active .nav-count { color: #09291c; background: #f0d29a; }
+@media (max-width: 520px) {
+  .brand-lockup .greeting { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
