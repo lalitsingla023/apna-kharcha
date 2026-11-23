@@ -1,12 +1,12 @@
-const CACHE_NAME = 'monetra-v44-cloud-sync';
+const CACHE_NAME = 'monetra-v45-verified-sync';
 const APP_SHELL = [
   './',
   './index.html',
-  './style.css?v=4.4.0',
-  './app.js?v=4.4.0',
-  './manifest.json?v=4.4.0'
+  './style.css?v=4.5.0',
+  './app.js?v=4.5.0',
+  './manifest.json?v=4.5.0'
 ];
-const OPTIONAL_ASSETS = ['./icon-192.png?v=4.4.0', './icon-512.png?v=4.4.0'];
+const OPTIONAL_ASSETS = ['./icon-192.png?v=4.5.0', './icon-512.png?v=4.5.0'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -25,7 +25,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key.startsWith('apna-kharcha-') && key !== CACHE_NAME).map(key => caches.delete(key)));
+    await Promise.all(keys.filter(key => (key.startsWith('apna-kharcha-') || key.startsWith('monetra-')) && key !== CACHE_NAME).map(key => caches.delete(key)));
     await self.clients.claim();
   })());
 });

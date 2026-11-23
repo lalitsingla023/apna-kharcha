@@ -209,10 +209,11 @@ function cloudRecordData(row, index, normalizer) {
 }
 function mergeByRecordId(localItems, cloudItems) {
   const merged = new Map();
-  // Keep local copies for matching IDs (they may contain changes made while offline),
-  // while also adding every cloud-only record so a second device can be hydrated.
+  // Supabase is authoritative for records that already exist in the account.
+  // Preserve local-only records (for example, a backup import not yet uploaded),
+  // but do not let an older cached copy overwrite a newer cloud edit on sign-in.
   localItems.forEach(item => merged.set(String(item.id), item));
-  cloudItems.forEach(item => { if (!merged.has(String(item.id))) merged.set(String(item.id), item); });
+  cloudItems.forEach(item => merged.set(String(item.id), item));
   return [...merged.values()];
 }
 async function readCloudFinanceData(authUser) {
@@ -224,52 +225,106 @@ async function readCloudFinanceData(authUser) {
   ];
   const result = {};
   for (const [table, normalizer] of tables) {
-    const { data, error } = await monetraSupabase.from(table).select('record_id,data').eq('user_id', authUser.id);
-    if (error) throw new Error(`Could not read ${table}: ${error.message}`);
-    result[table] = (data || []).map((row, index) => cloudRecordData(row, index, normalizer));
+    const { data, error } = await monetraSupabase
+      .from(table)
+      .select('record_id,data,deleted_at')
+      .eq('user_id', authUser.id);
+    if (error) {
+      if (/deleted_at|column/i.test(error.message || '')) {
+        throw new Error(`Cloud schema for ${table} is not upgraded. Run MONETRA_CLOUD_SYNC_V45.sql in Supabase SQL Editor, then reload.`);
+      }
+      throw new Error(`Could not read ${table}: ${error.message}`);
+    }
+    const rows = data || [];
+    result[table] = rows
+      .filter(row => !row.deleted_at)
+      .map((row, index) => cloudRecordData(row, index, normalizer));
+    result[`${table}DeletedIds`] = new Set(rows.filter(row => row.deleted_at).map(row => String(row.record_id)));
   }
   return result;
 }
-async function syncCloudCollection(table, items, authUserId, timestamp) {
+async function syncCloudCollection(table, items, authUserId, timestamp, allowRestore = false) {
+  // Read the complete ID set first. Soft-deleted IDs are tombstones: a stale device
+  // must never silently recreate them during an ordinary snapshot upload.
   const { data: existing, error: readError } = await monetraSupabase
-    .from(table).select('record_id').eq('user_id', authUserId);
-  if (readError) throw new Error(`Could not inspect ${table}: ${readError.message}`);
+    .from(table).select('record_id,deleted_at').eq('user_id', authUserId);
+  if (readError) {
+    if (/deleted_at|column/i.test(readError.message || '')) {
+      throw new Error(`Cloud schema for ${table} is not upgraded. Run MONETRA_CLOUD_SYNC_V45.sql in Supabase SQL Editor, then reload.`);
+    }
+    throw new Error(`Could not inspect ${table}: ${readError.message}`);
+  }
+
+  const existingRows = existing || [];
+  const tombstonedIds = new Set(existingRows.filter(row => row.deleted_at).map(row => String(row.record_id)));
+  const attemptedResurrection = !allowRestore && items.find(item => tombstonedIds.has(String(item.id)));
+  if (attemptedResurrection) {
+    throw new Error(`A record in ${table} was deleted on another device. Reload MONETRA before making more changes; this prevents an old copy from restoring a deleted record.`);
+  }
 
   const rows = items.map(item => ({
     user_id: authUserId,
     record_id: String(item.id),
     data: item,
-    updated_at: timestamp
+    updated_at: timestamp,
+    deleted_at: null
   }));
   if (rows.length) {
-    const { error } = await monetraSupabase.from(table).upsert(rows, { onConflict: 'user_id,record_id' });
+    const { data: savedRows, error } = await monetraSupabase
+      .from(table)
+      .upsert(rows, { onConflict: 'user_id,record_id' })
+      .select('record_id');
     if (error) {
       const detail = /on conflict|unique|constraint/i.test(error.message)
-        ? ' Run MONETRA_CLOUD_SYNC_SETUP.sql once in Supabase SQL Editor, then reload.'
+        ? ' Run MONETRA_CLOUD_SYNC_SETUP.sql once in Supabase SQL Editor.'
         : '';
-      throw new Error(`Could not upload ${table}: ${error.message}.${detail}`);
+      throw new Error(`Could not upload/update ${table}: ${error.message}.${detail}`);
+    }
+    if ((savedRows || []).length !== rows.length) {
+      throw new Error(`Supabase did not confirm every ${table} upload/update. Check the authenticated-user INSERT and UPDATE RLS policies.`);
     }
   }
 
   const wanted = new Set(items.map(item => String(item.id)));
-  const stale = (existing || []).map(row => String(row.record_id)).filter(id => !wanted.has(id));
+  const stale = existingRows
+    .filter(row => !row.deleted_at && !wanted.has(String(row.record_id)))
+    .map(row => String(row.record_id));
+  // Soft delete, rather than physically deleting, so another device can learn
+  // about the deletion and cannot resurrect an outdated local copy.
   for (let start = 0; start < stale.length; start += 100) {
     const batch = stale.slice(start, start + 100);
-    const { error } = await monetraSupabase.from(table).delete().eq('user_id', authUserId).in('record_id', batch);
-    if (error) throw new Error(`Could not remove replaced records from ${table}: ${error.message}`);
+    const { data: deletedRows, error } = await monetraSupabase
+      .from(table)
+      .update({ deleted_at: timestamp, updated_at: timestamp })
+      .eq('user_id', authUserId)
+      .in('record_id', batch)
+      .is('deleted_at', null)
+      .select('record_id');
+    if (error) {
+      throw new Error(`Could not synchronize deletion in ${table}: ${error.message}. Check the authenticated-user UPDATE RLS policy and run MONETRA_CLOUD_SYNC_V45.sql.`);
+    }
+    const deletedIds = new Set((deletedRows || []).map(row => String(row.record_id)));
+    const missing = batch.filter(id => !deletedIds.has(id));
+    if (missing.length) {
+      throw new Error(`Supabase did not confirm deletion of ${missing.length} ${table} record(s). Your device copy is retained. Check the UPDATE RLS policy and reload before using another device.`);
+    }
   }
 }
-async function syncCloudSnapshot(snapshot) {
+async function syncCloudSnapshot(snapshot, options = {}) {
   if (!monetraSupabase || !monetraCloudUser?.id) throw new Error('No active Google account is available for cloud sync.');
   const timestamp = new Date().toISOString();
-  await syncCloudCollection(MONETRA_CLOUD_TABLES.transactions, snapshot.transactions, monetraCloudUser.id, timestamp);
-  await syncCloudCollection(MONETRA_CLOUD_TABLES.creditPurchases, snapshot.creditPurchases, monetraCloudUser.id, timestamp);
-  await syncCloudCollection(MONETRA_CLOUD_TABLES.loans, snapshot.loans, monetraCloudUser.id, timestamp);
+  const allowRestore = options.allowRestore === true;
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.transactions, snapshot.transactions, monetraCloudUser.id, timestamp, allowRestore);
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.creditPurchases, snapshot.creditPurchases, monetraCloudUser.id, timestamp, allowRestore);
+  await syncCloudCollection(MONETRA_CLOUD_TABLES.loans, snapshot.loans, monetraCloudUser.id, timestamp, allowRestore);
 }
-function queueCloudSync(snapshot) {
-  const operation = cloudSyncQueue.catch(() => {}).then(() => syncCloudSnapshot(snapshot));
+function queueCloudSync(snapshot, options = {}) {
+  const operation = cloudSyncQueue.catch(() => {}).then(() => syncCloudSnapshot(snapshot, options));
   cloudSyncQueue = operation;
   return operation;
+}
+function excludeCloudDeleted(items, deletedIds) {
+  return items.filter(item => !deletedIds.has(String(item.id)));
 }
 async function initializeCloudData() {
   cloudSyncReady = false;
@@ -277,23 +332,28 @@ async function initializeCloudData() {
   const localCount = localSnapshot.transactions.length + localSnapshot.creditPurchases.length + localSnapshot.loans.length;
   const cloud = await readCloudFinanceData(monetraCloudUser);
   const cloudCount = cloud.transactions.length + cloud.credit_purchases.length + cloud.loans.length;
+  const tombstoneCount = cloud.transactionsDeletedIds.size + cloud.credit_purchasesDeletedIds.size + cloud.loansDeletedIds.size;
 
-  if (cloudCount > 0) {
-    transactions = sortByDateDesc(mergeByRecordId(localSnapshot.transactions, cloud.transactions));
-    creditPurchases = mergeByRecordId(localSnapshot.creditPurchases, cloud.credit_purchases);
-    loans = mergeByRecordId(localSnapshot.loans, cloud.loans);
+  if (cloudCount > 0 || tombstoneCount > 0) {
+    // Cloud tombstones outrank local cached copies. This is what makes a deletion
+    // on one device stay deleted when a different, older device signs in later.
+    const localTransactions = excludeCloudDeleted(localSnapshot.transactions, cloud.transactionsDeletedIds);
+    const localCards = excludeCloudDeleted(localSnapshot.creditPurchases, cloud.credit_purchasesDeletedIds);
+    const localLoans = excludeCloudDeleted(localSnapshot.loans, cloud.loansDeletedIds);
+    transactions = sortByDateDesc(mergeByRecordId(localTransactions, cloud.transactions));
+    creditPurchases = mergeByRecordId(localCards, cloud.credit_purchases);
+    loans = mergeByRecordId(localLoans, cloud.loans);
     if (!saveData()) throw new Error('Could not save cloud records to this device. Check available browser storage.');
     await syncCloudSnapshot(currentFinanceSnapshot());
     cloudSyncReady = true;
     return { source: 'cloud', counts: { transactions: transactions.length, creditPurchases: creditPurchases.length, loans: loans.length } };
   }
 
-  // First device after the backup restore: move its local records into the authenticated cloud account.
+  // First device after backup restore: upload its local records to this account.
   if (localCount > 0) await syncCloudSnapshot(localSnapshot);
   cloudSyncReady = true;
   return { source: localCount > 0 ? 'local' : 'empty', counts: { transactions: localSnapshot.transactions.length, creditPurchases: localSnapshot.creditPurchases.length, loans: localSnapshot.loans.length } };
 }
-
 const THEME_STORAGE_KEY = 'montera_theme_preference';
 const themeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -591,7 +651,7 @@ function loadData() {
     loans = [];
   }
 }
-function saveData() {
+function saveData(options = {}) {
   if (!user) return false;
   const state = { format: 'apna-kharcha-backup', version: APP_VERSION, savedAt: new Date().toISOString(), transactions, creditPurchases, loans };
   try {
@@ -600,11 +660,15 @@ function saveData() {
     localStorage.setItem(getStorageKey('data'), JSON.stringify(transactions));
     if (cloudSyncReady && monetraCloudUser?.id) {
       const snapshot = currentFinanceSnapshot();
-      lastCloudSyncPromise = queueCloudSync(snapshot).then(() => true).catch(error => {
-        console.error('MONETRA cloud sync:', error);
-        showToast('Saved on this device, but cloud sync failed: ' + (error.message || 'Please reload and try again.'), 'error');
-        return false;
-      });
+      lastCloudSyncPromise = queueCloudSync(snapshot, { allowRestore: options.allowRestore === true })
+        .then(() => true)
+        .catch(error => {
+          console.error('MONETRA cloud sync:', error);
+          showToast('Saved on this device, but Supabase did not confirm the change: ' + (error.message || 'Please reload and try again.'), 'error');
+          return false;
+        });
+    } else {
+      lastCloudSyncPromise = Promise.resolve(false);
     }
     return true;
   } catch (error) {
@@ -704,11 +768,15 @@ function refreshDashboardSafely() {
     showToast('Your entry was saved, but the screen could not refresh. Reopen this section to view it.', 'error');
   }
 }
-function saveAndRefresh(closeId = null) {
-  if (!saveData()) return false;
+async function saveAndRefresh(closeId = null, options = {}) {
+  if (!saveData(options)) return false;
   if (closeId) closeModal(closeId);
   refreshDashboardSafely();
-  return true;
+  if (!cloudSyncReady) {
+    showToast('Saved on this device only. Cloud sync is not ready; reload and sign in before using another device.', 'error');
+    return false;
+  }
+  return await lastCloudSyncPromise;
 }
 
 function element(tag, className, text) {
@@ -1065,7 +1133,7 @@ function closeModal(id) {
 // Expose the real modal function directly. Do not wrap it by calling the global
 // closeModal name: that would recurse after the window property is reassigned.
 window.closeModal = closeModal;
-txForm.addEventListener('submit', event => {
+txForm.addEventListener('submit', async event => {
   event.preventDefault();
   const id = $('tx-id').value;
   const type = $('tx-type').value;
@@ -1086,15 +1154,24 @@ txForm.addEventListener('submit', event => {
     transactions.push({ id: createId('tx'), amount, title, date, time, type, category, method, categorySuggested: false });
   }
   transactions = sortByDateDesc(transactions);
-  if (!saveAndRefresh('transaction-modal')) return;
+  if (!await saveAndRefresh('transaction-modal')) return;
   showToast(id ? 'Transaction updated.' : (type === 'in' ? 'Money received has been recorded.' : 'Expense saved.'));
 });
-function deleteTransaction(id) {
+async function deleteTransaction(id) {
   const tx = transactions.find(item => item.id === id);
   if (!tx || tx.systemManaged) { showToast('This linked item is managed in its own section.', 'error'); return; }
   if (!window.confirm(`Delete “${tx.title}” (${formatCurrency(tx.amount)})?`)) return;
+  const previous = transactions;
   transactions = transactions.filter(item => item.id !== id);
-  saveData(); updateDashboard(); showToast('Transaction deleted.');
+  if (!saveData()) { transactions = previous; refreshDashboardSafely(); return; }
+  refreshDashboardSafely();
+  if (!cloudSyncReady) {
+    showToast('Removed on this device only. Cloud sync is not ready; do not use another device until synchronization succeeds.', 'error');
+    return;
+  }
+  const synced = await lastCloudSyncPromise;
+  if (synced) showToast('Transaction deleted and deletion confirmed in your MONETRA cloud account.');
+  else showToast('Transaction is removed on this device, but Supabase did not confirm the deletion. Keep this device data and reload after fixing the sync error.', 'error');
 }
 window.deleteTransaction = deleteTransaction;
 
@@ -1120,16 +1197,25 @@ function openEditCardPurchase(id) {
   $('cc-date').value = purchase.date;
   showModal('card-purchase-modal');
 }
-function deleteCardPurchase(id) {
+async function deleteCardPurchase(id) {
   const purchase = creditPurchases.find(p => p.id === id);
   if (!purchase || purchase.paidAmount > 0) return;
   if (!window.confirm(`Delete “${purchase.title}” (${formatCurrency(purchase.amount)})?`)) return;
+  const previous = creditPurchases;
   creditPurchases = creditPurchases.filter(p => p.id !== id);
-  saveData(); updateDashboard(); showToast('Card purchase deleted.');
+  if (!saveData()) { creditPurchases = previous; refreshDashboardSafely(); return; }
+  refreshDashboardSafely();
+  if (!cloudSyncReady) {
+    showToast('Removed on this device only. Cloud sync is not ready; do not use another device until synchronization succeeds.', 'error');
+    return;
+  }
+  const synced = await lastCloudSyncPromise;
+  if (synced) showToast('Card purchase deleted and deletion confirmed in your MONETRA cloud account.');
+  else showToast('Card purchase is removed on this device, but Supabase did not confirm the deletion. Keep this device data and reload after fixing the sync error.', 'error');
 }
 window.openCardPurchaseModal = openCardPurchaseModal;
 $('add-card-purchase-btn').addEventListener('click', openCardPurchaseModal);
-$('card-purchase-form').addEventListener('submit', event => {
+$('card-purchase-form').addEventListener('submit', async event => {
   event.preventDefault();
   const id = $('cc-id').value;
   const amount = safeNumber($('cc-amount').value);
@@ -1147,7 +1233,7 @@ $('card-purchase-form').addEventListener('submit', event => {
   } else {
     creditPurchases.push({ id: createId('card'), amount, paidAmount: 0, title, category, cardName, date, dueDate: addDaysISO(date, 25), payments: [], createdAt: new Date().toISOString() });
   }
-  if (!saveAndRefresh('card-purchase-modal')) return;
+  if (!await saveAndRefresh('card-purchase-modal')) return;
   showToast(id ? 'Card purchase updated.' : 'Card purchase saved. It will be included in spending insights, not deducted from cash yet.');
 });
 function openCardPaymentModal(prefillAmount = null, targetPurchaseId = '') {
@@ -1162,7 +1248,7 @@ function openCardPaymentModal(prefillAmount = null, targetPurchaseId = '') {
   showModal('card-payment-modal');
 }
 $('pay-card-btn').addEventListener('click', () => openCardPaymentModal());
-$('card-payment-form').addEventListener('submit', event => {
+$('card-payment-form').addEventListener('submit', async event => {
   event.preventDefault();
   const amount = safeNumber($('card-payment-amount').value);
   const outstanding = cardOutstanding();
@@ -1193,7 +1279,7 @@ $('card-payment-form').addEventListener('submit', event => {
   });
   const paymentId = createId('cc-payment');
   transactions.push({ id: paymentId, amount, title: 'Credit card payment', date, time: `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`, type: 'out', category: 'Credit Card Payment', method, kind: 'credit-card-payment', systemManaged: true, excludeFromSpendStats: true, ccAllocations: allocations });
-  if (!saveAndRefresh('card-payment-modal')) return;
+  if (!await saveAndRefresh('card-payment-modal')) return;
   showToast('Card payment recorded and deducted from your available balance.');
 });
 
@@ -1221,7 +1307,7 @@ function openEditLoan(id) {
 }
 window.openLoanModal = openLoanModal;
 $('add-loan-btn').addEventListener('click', openLoanModal);
-$('loan-form').addEventListener('submit', event => {
+$('loan-form').addEventListener('submit', async event => {
   event.preventDefault();
   const loanId = $('loan-id').value;
   const amount = safeNumber($('loan-amount').value);
@@ -1255,15 +1341,14 @@ $('loan-form').addEventListener('submit', event => {
     transactions.push({ id: txId, amount, title: `Money lent to ${person}`, date, time: '12:00', type: 'out', category: 'Money Lent', method, kind: 'loan-disbursement', loanId: newLoanId, systemManaged: true, excludeFromSpendStats: true });
     successMessage = `Recorded. ${formatCurrency(amount)} has been deducted from your balance.`;
   }
-  if (!saveAndRefresh('loan-modal')) return;
+  if (!await saveAndRefresh('loan-modal')) return;
   showToast(successMessage);
 });
-function deleteLoan(id) {
+async function deleteLoan(id) {
   const loan = loans.find(item => item.id === id);
   if (!loan) return;
 
-  // Remove the original cash-out and all linked returns together so the balance
-  // and transaction ledger stay consistent when a lending record is deleted.
+  // The loan and its linked ledger entries are one logical deletion.
   const linked = transactions.filter(tx => tx.loanId === id || tx.id === loan.sourceTransactionId);
   const repayments = linked.filter(tx => tx.kind === 'loan-repayment');
   const returnedAmount = sum(repayments, tx => tx.amount);
@@ -1281,7 +1366,13 @@ function deleteLoan(id) {
     return;
   }
   refreshDashboardSafely();
-  showToast(`Lending record for ${loan.person} deleted.`);
+  if (!cloudSyncReady) {
+    showToast('Removed on this device only. Cloud sync is not ready; do not use another device until synchronization succeeds.', 'error');
+    return;
+  }
+  const synced = await lastCloudSyncPromise;
+  if (synced) showToast(`Lending record for ${loan.person} and its linked entries were deleted and confirmed in your MONETRA cloud account.`);
+  else showToast('Lending record is removed on this device, but Supabase did not confirm every deletion. Keep this device data and reload after fixing the sync error.', 'error');
 }
 window.deleteLoan = deleteLoan;
 function openLoanRepayment(id) {
@@ -1296,7 +1387,7 @@ function openLoanRepayment(id) {
   $('repayment-date').value = localDateISO();
   showModal('loan-repayment-modal');
 }
-$('loan-repayment-form').addEventListener('submit', event => {
+$('loan-repayment-form').addEventListener('submit', async event => {
   event.preventDefault();
   const loan = loans.find(item => item.id === $('repayment-loan-id').value);
   if (!loan || loan.outstanding <= 0) return;
@@ -1310,7 +1401,7 @@ $('loan-repayment-form').addEventListener('submit', event => {
   loan.repayments = Array.isArray(loan.repayments) ? loan.repayments : [];
   loan.repayments.push({ id: createId('repay'), amount, date, method });
   transactions.push({ id: createId('tx-repay'), amount, title: `Money returned by ${loan.person}`, date, time: '12:00', type: 'in', category: 'Loan repayment', method, kind: 'loan-repayment', loanId: loan.id, systemManaged: true, excludeFromIncomeStats: true });
-  if (!saveAndRefresh('loan-repayment-modal')) return;
+  if (!await saveAndRefresh('loan-repayment-modal')) return;
   showToast('Repayment recorded. Your available balance has been increased.');
 });
 
@@ -1403,14 +1494,8 @@ $('restore-file').addEventListener('change', async event => {
     creditPurchases = restored.creditPurchases;
     loans = restored.loans;
     localStorage.removeItem(getStorageKey('notified'));
-    if (!saveAndRefresh('backup-modal')) return;
-    if (cloudSyncReady) {
-      const synced = await lastCloudSyncPromise;
-      if (synced) showToast(`Restored ${transactions.length} transactions and synchronized them to your Google account.`);
-      else showToast('Backup restored on this device, but cloud sync failed. Your local records are safe; see the cloud sync error.', 'error');
-    } else {
-      showToast('Backup restored on this device. Cloud sync is not ready yet; reload after fixing the Supabase setup.', 'error');
-    }
+    if (!await saveAndRefresh('backup-modal', { allowRestore: true })) return;
+    showToast(`Restored ${transactions.length} transactions and synchronized them to your Google account.`);
   } catch (error) {
     console.error('Restore failed:', error);
     showToast(error.message || 'Could not restore this backup.', 'error');
